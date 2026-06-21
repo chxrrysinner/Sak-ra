@@ -1,4 +1,4 @@
-# ModMail + Application Reviewer Bot
+# Sak-ra
 
 This is one Discord bot that handles both modmail tickets and Google Form staff application reviews.
 

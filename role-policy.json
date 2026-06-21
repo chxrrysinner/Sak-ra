@@ -1,0 +1,60 @@
+{
+  "staffHierarchy": {
+    "assistants": [
+      "1,1482059768175788042",
+      "M,1516646051187003392"
+    ],
+    "moderation": [
+      "1,1482059687468994725",
+      "2,1482059618577551468",
+      "3,1482059551728472116",
+      "M,1516647655974109314"
+    ],
+    "partnership": [
+      "1,1503227960797298698",
+      "M,1516645826095616050"
+    ],
+    "hr": [
+      "1,1516645614254030961",
+      "M,1516645748760903760"
+    ],
+    "internals": [
+      "I,1482059494606508216",
+      "I,1502656521333506148",
+      "I,1482054244637872189"
+    ]
+  },
+  "demoteExempt": [],
+  "leadCategoryRole": "",
+  "categoryRoles": {
+    "moderation": "1516651021940822017",
+    "partnership": "1516651170700066866",
+    "hr": "1517008657206739046",
+    "internals": "1516651334500094085"
+  },
+  "commands": {
+    "ping": ["all"],
+    "help": ["all"],
+    "snippets": ["all"],
+    "preview": ["all"],
+    "timer": ["all"],
+    "userInfo": ["all"],
+    "claimInfo": ["all"],
+    "closeInfo": ["all"],
+    "fclose": ["internals"],
+    "stafflist": ["internals", "hr"],
+    "break": ["all"],
+    "manageBreaks": ["internals", "hr"],
+    "overrideClaims": ["internals", "hr", "M,moderation", "M,assistants", "M,partnership"],
+    "refresh": ["internals", "hr"],
+    "approve": ["internals", "hr"],
+    "reject": ["internals", "hr"],
+    "strike": ["internals", "hr"],
+    "strikesOthers": ["M,internals", "I,internals"],
+    "removeStrike": ["M,internals", "I,internals"],
+    "pban": ["moderation", "internals"],
+    "addproof": ["all-partnership"],
+    "cban": ["all-partnership"],
+    "hiddenDeleteBotMessage": ["internals"]
+  }
+}

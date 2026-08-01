@@ -1,6 +1,7 @@
 import stateManager from '../../core/state.js';
 import { findGuild } from '../../bridge.js';
 import client from '../../core/client.js';
+import config from '../../core/config.js';
 import { styledEmbed, trimTo } from '../../core/embeds.js';
 import {
   memberCanRunDemote, normalizeStaffWingId, staffWingNameFor,
@@ -10,7 +11,7 @@ import {
   memberHasAnyRole, demoteCommandRoleIds
 } from '../../core/permissions.js';
 
-const ROLE_POLICY_FILE = process.env.ROLE_POLICY_FILE || './role-policy.json';
+const ROLE_POLICY_FILE =       config.paths.rolePolicyFile || './role-policy.json';
 
 async function makeLeadUser(author, targetUser, wing, guild) {
   const wingId = normalizeStaffWingId(wing);
@@ -80,7 +81,7 @@ async function makeLeadUser(author, targetUser, wing, guild) {
 async function handleSlashCommand(interaction) {
   const allowed = await memberCanRunDemote(interaction);
   if (!allowed) {
-    await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+    await interaction.reply({ content: '\u200b', ephemeral: true }).catch(() => {});
     return;
   }
 
@@ -96,10 +97,7 @@ async function handleSlashCommand(interaction) {
 
 async function handlePrefixCommand(message, args, guildId) {
   const allowed = await memberHasAnyRole(guildId, message.author.id, demoteCommandRoleIds());
-  if (!allowed) {
-    await message.reply('You do not have permission to use this command.');
-    return;
-  }
+  if (!allowed) return;
 
   if (args.length < 2) {
     await message.reply('Usage: `?makelead <@user> <wing>`');

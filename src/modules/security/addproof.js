@@ -41,7 +41,7 @@ async function handlePrefixCommand(message, args, guildId) {
 export default async function handleAddProofCommand(interaction) {
   const allowed = interaction.member && memberHasPermission(interaction.member, 'security.addproof');
   if (!allowed) {
-    await interaction.reply({ content: 'You do not have permission to use this command.' });
+    await interaction.reply({ content: '\u200b', ephemeral: true }).catch(() => {});
     return;
   }
 

@@ -6,12 +6,9 @@ const sessionOwners = new Map();
 
 const CATEGORIES = [
   { id: 'breaks', label: 'staff breaks', emoji: '☕' },
-  { id: 'tickets', label: 'open tickets', emoji: '🎫' },
   { id: 'strikes', label: 'strike records', emoji: '⚠️' },
-  { id: 'pplans', label: 'performance plans', emoji: '📋' },
   { id: 'pban', label: 'pban proposals', emoji: '🔨' },
   { id: 'banprofiles', label: 'ban profiles', emoji: '📁' },
-  { id: 'timedcloses', label: 'timed closes', emoji: '⏰' },
   { id: 'tempbans', label: 'tempbans', emoji: '🔒' }
 ];
 
@@ -60,16 +57,6 @@ async function getCategoryData(categoryId) {
       }));
       break;
     }
-    case 'tickets': {
-      const state = globalThis.__HALLOWS_STATE__ || {};
-      data.open = Object.entries(state.ticketsByUserId || {}).map(([uid, t]) => ({
-        id: uid,
-        label: `${uid.slice(0, 8)}`,
-        summary: `<@${uid}> — ${t.departmentId || 'no dept'}`,
-        detail: `${t.priority || 'normal'} | <#${t.channelId || '?'}>`
-      }));
-      break;
-    }
     case 'strikes': {
       const state = globalThis.__HALLOWS_STATE__ || {};
       data.records = Object.entries(state.strikesByUserId || {}).map(([uid, strikes]) => ({
@@ -77,16 +64,6 @@ async function getCategoryData(categoryId) {
         label: `${uid.slice(0, 8)} — ${strikes.length}`,
         summary: `<@${uid}> — ${strikes.length} strike${strikes.length === 1 ? '' : 's'}`,
         detail: strikes.map(s => s.reason?.slice(0, 40)).join('; ').slice(0, 100)
-      }));
-      break;
-    }
-    case 'pplans': {
-      const pplanState = globalThis.__HALLOWS_PERFORMANCE_PLAN_STATE__ || {};
-      data.plans = Object.values(pplanState.plansByUserId || {}).map(p => ({
-        id: p.userId,
-        label: `${p.userId.slice(0, 8)} — ${p.status || 'active'}`,
-        summary: `<@${p.userId}> — ${p.status || 'active'}`,
-        detail: p.reason?.slice(0, 60) || 'no reason'
       }));
       break;
     }
@@ -107,16 +84,6 @@ async function getCategoryData(categoryId) {
         label: `${bp.userId.slice(0, 8)} — ${(bp.proofUrls || []).length}p`,
         summary: `<@${bp.userId}> — ${(bp.proofUrls || []).length} proof(s)`,
         detail: bp.guildId ? `guild: ${bp.guildId.slice(0, 8)}` : ''
-      }));
-      break;
-    }
-    case 'timedcloses': {
-      const tcState = globalThis.__HALLOWS_TIMED_CLOSE_STATE__ || {};
-      data.closes = Object.entries(tcState.ticketsByUserId || {}).map(([ticketId, tc]) => ({
-        id: String(ticketId),
-        label: `ticket #${ticketId}${tc.warnedUser ? ' ✓' : ''}`,
-        summary: `ticket #${ticketId} — ${tc.warnedUser ? 'warned' : 'not warned'}`,
-        detail: `<t:${Math.floor((tc.closeAt || 0) / 1000)}:R>`
       }));
       break;
     }
@@ -228,26 +195,12 @@ async function flushCategory(categoryId) {
       if (typeof globalThis.__HALLOWS_SAVE_BREAK_STATE__ === 'function') await globalThis.__HALLOWS_SAVE_BREAK_STATE__();
       return `flushed ${count} staff break(s).`;
     }
-    case 'tickets': {
-      const state = globalThis.__HALLOWS_STATE__ || {};
-      const count = Object.keys(state.ticketsByUserId || {}).length;
-      state.ticketsByUserId = {};
-      if (typeof globalThis.__HALLOWS_SAVE_STATE__ === 'function') await globalThis.__HALLOWS_SAVE_STATE__();
-      return `flushed ${count} open ticket(s).`;
-    }
     case 'strikes': {
       const state = globalThis.__HALLOWS_STATE__ || {};
       const count = Object.keys(state.strikesByUserId || {}).length;
       state.strikesByUserId = {};
       if (typeof globalThis.__HALLOWS_SAVE_STATE__ === 'function') await globalThis.__HALLOWS_SAVE_STATE__();
       return `flushed ${count} strike record(s).`;
-    }
-    case 'pplans': {
-      const pplanState = globalThis.__HALLOWS_PERFORMANCE_PLAN_STATE__ || {};
-      const count = Object.keys(pplanState.plansByUserId || {}).length;
-      pplanState.plansByUserId = {};
-      if (typeof globalThis.__HALLOWS_SAVE_PERFORMANCE_PLAN_STATE__ === 'function') await globalThis.__HALLOWS_SAVE_PERFORMANCE_PLAN_STATE__();
-      return `flushed ${count} performance plan(s).`;
     }
     case 'pban': {
       const state = globalThis.__HALLOWS_STATE__ || {};
@@ -262,13 +215,6 @@ async function flushCategory(categoryId) {
       state.banProfilesByGuildUser = {};
       if (typeof globalThis.__HALLOWS_SAVE_STATE__ === 'function') await globalThis.__HALLOWS_SAVE_STATE__();
       return `flushed ${count} ban profile(s).`;
-    }
-    case 'timedcloses': {
-      const tcState = globalThis.__HALLOWS_TIMED_CLOSE_STATE__ || {};
-      const count = Object.keys(tcState.ticketsByUserId || {}).length;
-      tcState.ticketsByUserId = {};
-      if (typeof globalThis.__HALLOWS_SAVE_TIMED_CLOSE_STATE__ === 'function') await globalThis.__HALLOWS_SAVE_TIMED_CLOSE_STATE__();
-      return `flushed ${count} timed close(s).`;
     }
     case 'tempbans': {
       const gId = process.env.GUILD_ID;
@@ -293,30 +239,12 @@ async function flushOneEntry(categoryId, entryId) {
       if (found && typeof globalThis.__HALLOWS_SAVE_BREAK_STATE__ === 'function') await globalThis.__HALLOWS_SAVE_BREAK_STATE__();
       return found ? `flushed break for \`${entryId}\`.` : `entry \`${entryId}\` not found.`;
     }
-    case 'tickets': {
-      const state = globalThis.__HALLOWS_STATE__ || {};
-      if (state.ticketsByUserId?.[entryId]) {
-        delete state.ticketsByUserId[entryId];
-        if (typeof globalThis.__HALLOWS_SAVE_STATE__ === 'function') await globalThis.__HALLOWS_SAVE_STATE__();
-        return `flushed ticket for \`${entryId}\`.`;
-      }
-      return `entry \`${entryId}\` not found.`;
-    }
     case 'strikes': {
       const state = globalThis.__HALLOWS_STATE__ || {};
       if (state.strikesByUserId?.[entryId]) {
         delete state.strikesByUserId[entryId];
         if (typeof globalThis.__HALLOWS_SAVE_STATE__ === 'function') await globalThis.__HALLOWS_SAVE_STATE__();
         return `flushed strikes for \`${entryId}\`.`;
-      }
-      return `entry \`${entryId}\` not found.`;
-    }
-    case 'pplans': {
-      const pplanState = globalThis.__HALLOWS_PERFORMANCE_PLAN_STATE__ || {};
-      if (pplanState.plansByUserId?.[entryId]) {
-        delete pplanState.plansByUserId[entryId];
-        if (typeof globalThis.__HALLOWS_SAVE_PERFORMANCE_PLAN_STATE__ === 'function') await globalThis.__HALLOWS_SAVE_PERFORMANCE_PLAN_STATE__();
-        return `flushed plan for \`${entryId}\`.`;
       }
       return `entry \`${entryId}\` not found.`;
     }
@@ -337,15 +265,6 @@ async function flushOneEntry(categoryId, entryId) {
         return `flushed ban profile \`${entryId}\`.`;
       }
       return `entry \`${entryId}\` not found.`;
-    }
-    case 'timedcloses': {
-      const tcState = globalThis.__HALLOWS_TIMED_CLOSE_STATE__ || {};
-      if (tcState.ticketsByUserId?.[entryId]) {
-        delete tcState.ticketsByUserId[entryId];
-        if (typeof globalThis.__HALLOWS_SAVE_TIMED_CLOSE_STATE__ === 'function') await globalThis.__HALLOWS_SAVE_TIMED_CLOSE_STATE__();
-        return `flushed timed close #${entryId}.`;
-      }
-      return `entry #${entryId} not found.`;
     }
     case 'tempbans': {
       const gId = process.env.GUILD_ID;

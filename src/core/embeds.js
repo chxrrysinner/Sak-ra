@@ -2,11 +2,6 @@ import { EmbedBuilder } from 'discord.js';
 import config from './config.js';
 
 const HALLOWS_ORANGE = 0xc67a3a;
-const MODMAIL_PINK = 0xffb7c5;
-
-function modmailEmbed(title, description) {
-  return styledEmbed(title, description);
-}
 
 function styledEmbed(title, description) {
   return new EmbedBuilder()
@@ -77,39 +72,6 @@ function messageBody(message, fallback) {
   })), fallback);
 }
 
-function modmailMessageEmbed({ title, content, attachments, fallback, author }) {
-  const embed = modmailEmbed(title, messageBodyFromParts(content, attachments, fallback));
-  const imageAttachment = firstImageAttachment(attachments);
-
-  if (author) {
-    embed.setAuthor(author);
-  }
-
-  if (imageAttachment) {
-    embed.setImage(imageAttachment.url);
-  }
-
-  return embed;
-}
-
-function modmailMessageEmbeds({ title, content, attachments, fallback, author }) {
-  const images = imageAttachments(attachments);
-  if (!images.length) {
-    return [modmailMessageEmbed({ title, content, attachments, fallback, author })];
-  }
-
-  const nonImageAttachments = normalizeAttachments(attachments).filter((attachment) => !isImageAttachment(attachment));
-  const embeds = [
-    modmailMessageEmbed({ title, content, attachments: [images[0], ...nonImageAttachments], fallback, author })
-  ];
-
-  for (const attachment of images.slice(1)) {
-    embeds.push(styledEmbed('Attachment', '\u200b').setImage(attachment.url));
-  }
-
-  return embeds;
-}
-
 async function sendEmbedsAsMessages(channel, embeds, options = {}) {
   const { firstMessageContent, ...messageOptions } = options;
 
@@ -166,7 +128,6 @@ async function sendPlainTextMessages(channel, text, options = {}) {
 export {
   HALLOWS_ORANGE,
   styledEmbed,
-  modmailEmbed,
   trimTo,
   containsDiscordInvite,
   isImageAttachment,
@@ -176,8 +137,6 @@ export {
   attachmentLines,
   messageBodyFromParts,
   messageBody,
-  modmailMessageEmbed,
-  modmailMessageEmbeds,
   sendEmbedsAsMessages,
   sendPlainTextMessages,
   splitPlainTextMessage,

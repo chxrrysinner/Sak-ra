@@ -34,7 +34,7 @@ export default async function handlePbanVoteButton(interaction) {
 
   const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
   if (!member || !memberCanVotePban(member)) {
-    await interaction.reply({ content: 'You do not have permission to vote on this pban proposal.', ephemeral: true });
+    await interaction.reply({ content: '\u200b', ephemeral: true }).catch(() => {});
     return;
   }
 
@@ -46,7 +46,7 @@ export default async function handlePbanVoteButton(interaction) {
 
   const pbanVote = highestPbanVote(member);
   if (!pbanVote) {
-    await interaction.reply({ content: 'You do not have permission to vote on this pban proposal.', ephemeral: true });
+    await interaction.reply({ content: '\u200b', ephemeral: true }).catch(() => {});
     return;
   }
   if (action === 'abstain') {

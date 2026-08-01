@@ -1,7 +1,7 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
 import client from '../../core/client.js';
 import { styledEmbed, trimTo } from '../../core/embeds.js';
-import { staffRoleHierarchyIds, memberHasAnyCachedRole, staffWingNameFor, memberHasAnyRole, performancePlanRoleIds } from '../../core/permissions.js';
+import { staffRoleHierarchyIds, memberHasAnyCachedRole, staffWingNameFor } from '../../core/permissions.js';
 
 export function memberDisplayName(member) {
   return member.displayName || member.user?.username || member.id;
@@ -207,57 +207,4 @@ export function strikeRecordsFor(userId) {
   }
   const legacyCount = Number(strikes) || 0;
   return Array.from({ length: legacyCount }, () => ({ reason: 'Reason unavailable.' }));
-}
-
-export function performancePlanStatusLabel(status) {
-  return {
-    active: 'Active',
-    passed: 'Passed',
-    failed: 'Failed',
-    extended: 'Extended'
-  }[status] || status || 'Unknown';
-}
-
-export function performancePlanEmbed(plan, user = null) {
-  const notes = (plan.notes || []).slice(-5);
-  const lines = [
-    `**Staff Member:** ${user ? `<@${user.id}>` : `<@${plan.userId}>`} (\`${plan.userId}\`)`,
-    `**Wing:** ${staffWingNameFor(plan.wingId)}`,
-    `**Status:** ${performancePlanStatusLabel(plan.status)}`,
-    `**Started:** <t:${Math.floor(plan.startedAt / 1000)}:F> by <@${plan.startedByUserId}>`,
-    `**Due:** <t:${Math.floor(plan.dueAt / 1000)}:F>`,
-    `**Reason:** ${trimTo(plan.reason, 1000)}`,
-    `**Goals:** ${trimTo(plan.goals, 1000)}`
-  ];
-
-  if (plan.completedAt) {
-    lines.push(
-      `**Completed:** <t:${Math.floor(plan.completedAt / 1000)}:F> by <@${plan.completedByUserId}>`,
-      `**Result Note:** ${trimTo(plan.resultNote || 'No note provided.', 1000)}`
-    );
-  }
-
-  if (notes.length) {
-    lines.push(
-      '',
-      '**Recent Notes:**',
-      ...notes.map((note) => `- <t:${Math.floor(note.createdAt / 1000)}:d> <@${note.authorUserId}>: ${trimTo(note.content, 250)}`)
-    );
-  }
-
-  return styledEmbed('Performance Plan', lines.join('\n'));
-}
-
-export async function memberCanManagePerformancePlans(interaction) {
-  if (!interaction.guildId) return false;
-  const member = interaction.member || await interaction.guild?.members.fetch(interaction.user.id).catch(() => null);
-  if (!member) return false;
-  const { memberHasPermission } = await import('../../core/permissions.js');
-  return memberHasPermission(member, 'staff.performancePlans');
-}
-
-export async function performancePlanTargetMember(interaction, user) {
-  const guild = interaction.guild || await client.guilds.fetch(interaction.guildId).catch(() => null);
-  const member = guild ? await guild.members.fetch(user.id).catch(() => null) : null;
-  return member && memberHasAnyCachedRole(member, staffRoleHierarchyIds()) ? member : null;
 }

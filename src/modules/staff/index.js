@@ -5,7 +5,9 @@ const WING_COMMAND_CHOICES = WING_ORDER.map((wingId) => ({ name: wingId, value: 
 
 const helpSlashCommand = new SlashCommandBuilder()
   .setName('help')
-  .setDescription('List all available Hallows commands.');
+  .setDescription('List all available Hallows commands.')
+  .addStringOption((opt) =>
+    opt.setName('command').setDescription('Get help for a specific command').setRequired(false));
 
 const statsSlashCommand = new SlashCommandBuilder()
   .setName('stats')
@@ -15,7 +17,7 @@ const statsSlashCommand = new SlashCommandBuilder()
 
 const pingCommand = new SlashCommandBuilder()
   .setName('ping')
-  .setDescription('Check whether the modmail bot is online.');
+  .setDescription('Check whether Hallows is online.');
 
 const stafflistCommand = new SlashCommandBuilder()
   .setName('stafflist')
@@ -84,37 +86,15 @@ const listbreakCommand = new SlashCommandBuilder()
   .setName('listbreak')
   .setDescription('List all staff members currently on break.');
 
-const pplanCommand = new SlashCommandBuilder()
-  .setName('pplan')
-  .setDescription('Manage staff performance plans.')
-  .addSubcommand((sub) =>
-    sub.setName('start').setDescription('Start a performance plan for a staff member.')
-      .addUserOption((opt) => opt.setName('user').setDescription('The staff member to place on a plan.').setRequired(true))
-      .addStringOption((opt) => opt.setName('due').setDescription('When this plan is due, such as 3d or 1 week.').setMaxLength(100).setRequired(true))
-      .addStringOption((opt) => opt.setName('reason').setDescription('Why this plan is being started.').setMaxLength(1000).setRequired(true))
-      .addStringOption((opt) => opt.setName('goals').setDescription('What the staff member needs to improve or complete.').setMaxLength(1000).setRequired(true))
-      .addStringOption((opt) => opt.setName('wing').setDescription('Optional wing if auto-detection is ambiguous.').setRequired(false).addChoices(...WING_COMMAND_CHOICES)))
-  .addSubcommand((sub) =>
-    sub.setName('view').setDescription('View a staff member performance plan.')
-      .addUserOption((opt) => opt.setName('user').setDescription('The staff member to view.').setRequired(true)))
-  .addSubcommand((sub) =>
-    sub.setName('note').setDescription('Add a note to an active performance plan.')
-      .addUserOption((opt) => opt.setName('user').setDescription('The staff member to note.').setRequired(true))
-      .addStringOption((opt) => opt.setName('note').setDescription('The note to add.').setMaxLength(1000).setRequired(true)))
-  .addSubcommand((sub) =>
-    sub.setName('complete').setDescription('Complete an active performance plan.')
-      .addUserOption((opt) => opt.setName('user').setDescription('The staff member to complete.').setRequired(true))
-      .addStringOption((opt) => opt.setName('result').setDescription('How this plan ended.').setRequired(true)
-        .addChoices({ name: 'passed', value: 'passed' }, { name: 'failed', value: 'failed' }, { name: 'extended', value: 'extended' }))
-      .addStringOption((opt) => opt.setName('note').setDescription('Result note to save and DM.').setMaxLength(1000).setRequired(true)))
-  .addSubcommand((sub) =>
-    sub.setName('list').setDescription('List active performance plans.')
-      .addStringOption((opt) => opt.setName('wing').setDescription('Only list plans for this wing.').setRequired(false).addChoices(...WING_COMMAND_CHOICES)));
-
 export default {
   name: 'staff',
   version: '1.0.0',
   requires: [],
+  permissionNodes: {
+    'staff.breaks.manage': { description: 'Manage and view staff breaks', group: 'staff' },
+    'staff.stafflist': { description: 'View staff list', group: 'staff' },
+    'staff.breaks.request': { description: 'Request staff breaks', group: 'staff' }
+  },
   prefixCommands: [
     { command: 'help', handler: './help.js', permission: null },
     { command: 'st', handler: './stats.js', permission: null },
@@ -128,7 +108,6 @@ export default {
     { command: 'break', handler: './break.js', permission: null },
     { command: 'endbreak', handler: './endbreak.js', permission: null },
     { command: 'listbreak', handler: './listbreak.js', permission: null },
-    { command: 'pplan', handler: './pplan.js', permission: null },
     { command: 'ping', handler: './ping.js', permission: null }
   ],
   slashCommands: [
@@ -142,7 +121,6 @@ export default {
     { name: 'break', handler: './break.js', data: breakCommand },
     { name: 'endbreak', handler: './endbreak.js', data: endbreakCommand },
     { name: 'listbreak', handler: './listbreak.js', data: listbreakCommand },
-    { name: 'pplan', handler: './pplan.js', data: pplanCommand },
     { name: 'help', handler: './help.js', data: helpSlashCommand },
     { name: 'stats', handler: './stats.js', data: statsSlashCommand },
     { name: 'ping', handler: './ping.js', data: pingCommand }
@@ -150,14 +128,15 @@ export default {
   componentHandlers: {
     'staff_break_approve': './break.js',
     'staff_break_deny': './break.js',
-    'staff_break_request_modal': './break.js'
+    'staff_break_request_modal': './break.js',
+    'help_select_module': './help.js'
   },
   components: {
     buttons: ['staff_break_approve', 'staff_break_deny'],
-    selectMenus: [],
+    selectMenus: ['help_select_module'],
     modals: ['staff_break_request_modal']
   },
-  stateTables: ['strikes', 'staff_breaks', 'performance_plans', 'staff_activity'],
+  stateTables: ['strikes', 'staff_breaks', 'staff_activity'],
   onLoad: async (core) => {
     const { staffRoleHierarchyIds, memberHasAnyCachedRole } = await import('../../core/permissions.js');
     const stateManager = core.state;

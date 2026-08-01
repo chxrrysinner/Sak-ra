@@ -1,5 +1,5 @@
 import stateManager from '../../core/state.js';
-import { getSuccessResponse,  sendModerationDM, runModAction, checkHierarchy, parseDuration, formatDuration, extractUserAndReason } from './shared.js';
+import { getSuccessResponse,  sendModerationDM, runModAction, checkHierarchy, parseDuration, formatDuration, extractUserAndReason, hasProtectedRole } from './shared.js';
 
 async function handlePrefixCommand(message, args, guildId) {
   const parts = args.trim().split(/\s+/);
@@ -27,6 +27,10 @@ async function handlePrefixCommand(message, args, guildId) {
     const hierarchy = checkHierarchy(message.member, member);
     if (!hierarchy.allowed) {
       await message.reply(hierarchy.message);
+      return;
+    }
+    if (hasProtectedRole(member, guildId)) {
+      await message.reply('that user is protected.');
       return;
     }
   }
@@ -70,6 +74,10 @@ async function handleSlashCommand(interaction) {
     const hierarchy = checkHierarchy(interaction.member, member);
     if (!hierarchy.allowed) {
       await interaction.reply({ content: hierarchy.message, ephemeral: true });
+      return;
+    }
+    if (hasProtectedRole(member, guildId)) {
+      await interaction.reply({ content: 'that user is protected.', ephemeral: true });
       return;
     }
   }

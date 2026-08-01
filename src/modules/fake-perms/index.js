@@ -1,10 +1,4 @@
 import { SlashCommandBuilder } from 'discord.js';
-import { FAKE_PERMISSION_FLAGS } from '../../core/permissions.js';
-
-const flagChoices = Object.entries(FAKE_PERMISSION_FLAGS).map(([key, def]) => ({
-  name: def.label,
-  value: key
-}));
 
 const fakepermsSlashCommand = new SlashCommandBuilder()
   .setName('fakeperms')
@@ -13,21 +7,21 @@ const fakepermsSlashCommand = new SlashCommandBuilder()
     sub.setName('grant')
       .setDescription('Grant a fake permission flag to a role')
       .addStringOption((opt) =>
-        opt.setName('flag').setDescription('Permission flag').setRequired(true).addChoices(...flagChoices))
+        opt.setName('flag').setDescription('Permission flag').setRequired(true))
       .addRoleOption((opt) =>
         opt.setName('role').setDescription('Role to grant the permission to').setRequired(true)))
   .addSubcommand((sub) =>
     sub.setName('revoke')
       .setDescription('Revoke a fake permission from a role')
       .addStringOption((opt) =>
-        opt.setName('flag').setDescription('Permission flag').setRequired(true).addChoices(...flagChoices))
+        opt.setName('flag').setDescription('Permission flag').setRequired(true))
       .addRoleOption((opt) =>
         opt.setName('role').setDescription('Role to revoke from (omit to revoke all)').setRequired(false)))
   .addSubcommand((sub) =>
     sub.setName('list')
       .setDescription('List all fake permissions for this server')
       .addStringOption((opt) =>
-        opt.setName('flag').setDescription('Filter by flag (optional)').setRequired(false).addChoices(...flagChoices)));
+        opt.setName('flag').setDescription('Filter by flag (optional)').setRequired(false)));
 
 export default {
   name: 'fake-perms',

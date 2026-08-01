@@ -1,11 +1,34 @@
+import { readFileSync, existsSync } from 'node:fs';
 import { styledEmbed, trimTo } from '../../core/embeds.js';
-import { memberHasPermission } from '../../core/permissions.js';
+import { memberHasAnyCachedRole, staffRoleHierarchyIds } from '../../core/permissions.js';
 import { memberDisplayName } from './shared.js';
+import config from '../../core/config.js';
+
+function loadBreaksFromJson() {
+  try {
+    const filePath = './data/staff-breaks.json';
+    if (!existsSync(filePath)) return {};
+    const raw = readFileSync(filePath, 'utf-8');
+    return JSON.parse(raw);
+  } catch { return {}; }
+}
+
+function loadActiveBreaksForGuild(guildId) {
+  const brState = globalThis.__HALLOWS_BREAK_STATE__ || {};
+  let activeBreaks = Object.entries(brState.activeByUserId || {})
+    .filter(([, activeBreak]) => activeBreak.guildId === guildId);
+
+  if (!activeBreaks.length) {
+    const jsonData = loadBreaksFromJson();
+    activeBreaks = Object.entries(jsonData.activeByUserId || {})
+      .filter(([, activeBreak]) => activeBreak.guildId === guildId);
+  }
+
+  return activeBreaks;
+}
 
 async function listBreaks(guild, guildId) {
-  const brState = globalThis.__HALLOWS_BREAK_STATE__ || {};
-  const activeBreaks = Object.entries(brState.activeByUserId || {})
-    .filter(([, activeBreak]) => activeBreak.guildId === guildId);
+  const activeBreaks = loadActiveBreaksForGuild(guildId);
 
   if (!activeBreaks.length) {
     return styledEmbed('Staff Breaks', 'No staff members are currently on break.');
@@ -33,8 +56,8 @@ async function handleSlashCommand(interaction) {
     return;
   }
 
-  const allowed = interaction.member && memberHasPermission(interaction.member, 'staff.breaks.manage');
-  if (!allowed) {
+  const staffRoleIds = staffRoleHierarchyIds();
+  if (!staffRoleIds.length || !memberHasAnyCachedRole(interaction.member, staffRoleIds)) {
     await interaction.reply({ content: 'Command failed.', ephemeral: true });
     return;
   }
@@ -50,8 +73,8 @@ async function handlePrefixCommand(message, args, guildId) {
     return;
   }
 
-  const allowed = message.member && memberHasPermission(message.member, 'staff.breaks.manage');
-  if (!allowed) {
+  const staffRoleIds = staffRoleHierarchyIds();
+  if (!staffRoleIds.length || !memberHasAnyCachedRole(message.member, staffRoleIds)) {
     await message.reply('Command failed.');
     return;
   }

@@ -73,29 +73,11 @@ async function main() {
   client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    if (message.channel.type === 1) {
-      try {
-        const { relayUserDm } = await import('./modules/tickets/reply.js');
-        await relayUserDm(message);
-      } catch (error) {
-        logger.error({ userId: message.author.id, error: error.message }, 'DM relay error');
-      }
-      return;
-    }
-
     const guildId = message.guild?.id;
     if (!guildId) return;
 
     const prefix = getPrefix(guildId);
-    let parsed = parseCommand(message.content, prefix);
-    // Ticket commands always use ? prefix regardless of global prefix
-    const parsedWithQ = prefix !== '?' ? parseCommand(message.content, '?') : null;
-    if (parsedWithQ) {
-      const ticketCmd = registry.findPrefixCommand(parsedWithQ.name);
-      if (ticketCmd && ticketCmd.module === 'tickets') {
-        parsed = parsedWithQ;
-      }
-    }
+    const parsed = parseCommand(message.content, prefix);
     if (!parsed) return;
 
     try {
@@ -116,17 +98,6 @@ async function main() {
     return memberHasPermission(member, flag);
   }
 
-  function isTicketModule(moduleName) {
-    const desc = registry.get(moduleName);
-    return desc?.name === 'tickets';
-  }
-
-  function isTicketChannel(messageOrInteraction) {
-    const channelId = messageOrInteraction.channel?.id || messageOrInteraction.channelId;
-    if (!channelId) return false;
-    return !!stateManager.getTicketByChannel(channelId);
-  }
-
   async function checkModuleToggle(guildId, cmdInfo) {
     if (!guildId || !cmdInfo) return true;
     const moduleName = cmdInfo.module;
@@ -140,8 +111,6 @@ async function main() {
 
     const moduleEnabled = await checkModuleToggle(guildId, cmdInfo);
     if (!moduleEnabled) return;
-
-    if (isTicketModule(cmdInfo.module) && !isTicketChannel(message) && parsedName !== 'h' && parsedName !== 's' && parsedName !== 'tstart' && parsedName !== 'fclose') return;
 
     const allowed = await checkFakePermission(message, cmdInfo.requiredFakePermission);
     if (!allowed) return;
@@ -169,11 +138,6 @@ async function main() {
 
     const moduleEnabled = await checkModuleToggle(interaction.guildId, cmdInfo);
     if (!moduleEnabled) {
-      await interaction.reply({ content: '\u200b', ephemeral: true }).catch(() => {});
-      return;
-    }
-
-    if (isTicketModule(cmdInfo.module) && !isTicketChannel(interaction) && interaction.commandName !== 'fclose' && interaction.commandName !== 'tstart') {
       await interaction.reply({ content: '\u200b', ephemeral: true }).catch(() => {});
       return;
     }

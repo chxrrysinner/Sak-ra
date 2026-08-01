@@ -1,8 +1,9 @@
+import config from '../../core/config.js';
 import { styledEmbed, trimTo } from '../../core/embeds.js';
 import { staffRoleHierarchyIds, memberHasAnyRole, memberHasPermission } from '../../core/permissions.js';
 import { strikeRecordsFor } from './shared.js';
 
-const ROLE_POLICY_FILE = process.env.ROLE_POLICY_FILE || './role-policy.json';
+const ROLE_POLICY_FILE =       config.paths.rolePolicyFile || './role-policy.json';
 
 async function strikesEmbedFor(targetUser) {
   const strikes = strikeRecordsFor(targetUser.id);
@@ -26,13 +27,13 @@ async function handleSlashCommand(interaction) {
   const checkingAnotherUser = requestedUser && requestedUser.id !== interaction.user.id;
   const canCheckOthers = interaction.member && memberHasPermission(interaction.member, 'staff.strikesOthers');
   if (checkingAnotherUser && !canCheckOthers) {
-    await interaction.reply({ content: "You do not have permission to check another user's strikes.", ephemeral: true });
+    await interaction.reply({ content: '\u200b', ephemeral: true }).catch(() => {});
     return;
   }
 
   const canCheckOwnStrikes = await memberHasAnyRole(interaction.guildId, interaction.user.id, hierarchyRoleIds);
   if (!checkingAnotherUser && !canCheckOwnStrikes && !canCheckOthers) {
-    await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+    await interaction.reply({ content: '\u200b', ephemeral: true }).catch(() => {});
     return;
   }
 
@@ -51,10 +52,7 @@ async function handlePrefixCommand(message, args, guildId) {
   let targetUser = message.author;
   if (args.length > 0) {
     const canCheckOthers = message.member && memberHasPermission(message.member, 'staff.strikesOthers');
-    if (!canCheckOthers) {
-      await message.reply("You do not have permission to check another user's strikes.");
-      return;
-    }
+    if (!canCheckOthers) return;
     const first = args.trim().split(/\s+/)[0] || '';
     const userId = first.replace(/[<@!>]/g, '');
     try { targetUser = await message.client.users.fetch(userId); } catch {
@@ -64,10 +62,7 @@ async function handlePrefixCommand(message, args, guildId) {
   }
 
   const canCheckOwn = await memberHasAnyRole(guildId, targetUser.id, hierarchyRoleIds);
-  if (targetUser.id === message.author.id && !canCheckOwn && !memberHasPermission(message.member, 'staff.strikesOthers')) {
-    await message.reply('You do not have permission to use this command.');
-    return;
-  }
+  if (targetUser.id === message.author.id && !canCheckOwn && !memberHasPermission(message.member, 'staff.strikesOthers')) return;
 
   const embed = await strikesEmbedFor(targetUser);
   await message.channel.send({ embeds: [embed] });

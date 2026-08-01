@@ -24,18 +24,14 @@ async function renderStep(guildId, step, guild) {
         '',
         '**What we\'ll cover:**',
         '1. Prefix & appearance',
-        '2. Ticket system (channel, transcript, panel)',
-        '3. Wings, roles, hierarchy, command policies',
-        '4. Ticket branch policy (per-wing ping/reply/close)',
-        '5. Staff management (breaks, performance plans)',
-        '6. Snippets & command aliases',
-        '7. PBAN (proposal, voting, appeals)',
-        '8. Demote exemptions',
-        '9. Moderation (modlog, evidence, automod)',
-        '10. Fake permissions (28 flags — all command gates)',
-        '11. Security (anti-raid, anti-nuke)',
-        '12. Applications (review, approve, ghost ping)',
-        '13. Diagnostics & final validation',
+        '2. Wings, roles, hierarchy',
+        '3. Staff management (breaks)',
+        '4. PBAN (proposal, voting, appeals)',
+        '5. Demote exemptions',
+        '6. Moderation (modlog, evidence, automod)',
+        '7. Fake permissions',
+        '8. Security (anti-raid, anti-nuke)',
+        '9. Diagnostics & final validation',
         '',
         'You can exit anytime and resume from the dashboard.'
       ].join('\n'));
@@ -83,21 +79,11 @@ async function renderStep(guildId, step, guild) {
     }
 
     case 3: {
-      const current = config.supportPanel.channelId;
-      const embed = wizardEmbed(guildId, 'Step 3: Support Channel', [
-        'Where the "Open Ticket" button lives.',
-        current ? `Current: <#${current}>` : 'Not set.',
-        '',
-        'Click **Enter ID** below to set the channel, or **Skip**.'
-      ].join('\n'));
       return {
-        embeds: [embed],
+        embeds: [wizardEmbed(guildId, 'Step 3', 'This step has been removed.')],
         components: [
           new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('setup:id:SUPPORT_PANEL_CHANNEL_ID').setLabel('Enter Channel ID').setStyle(ButtonStyle.Primary)
-          ),
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('setup:step:5').setLabel('Skip →').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('setup:step:6').setLabel('Next →').setStyle(ButtonStyle.Success),
             navRow(guildId).components[0], navRow(guildId).components[1]
           )
         ]
@@ -105,16 +91,11 @@ async function renderStep(guildId, step, guild) {
     }
 
     case 4: {
-      const embed = wizardEmbed(guildId, 'Step 4: Panel Content', [
-        'This text appears above the "Open Ticket" button.',
-        'You can edit it or keep the default.'
-      ].join('\n'));
       return {
-        embeds: [embed],
+        embeds: [wizardEmbed(guildId, 'Step 4', 'This step has been removed.')],
         components: [
           new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('setup:step:4:content').setLabel('Edit Text').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('setup:step:5').setLabel('Keep Default →').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('setup:step:6').setLabel('Next →').setStyle(ButtonStyle.Success),
             navRow(guildId).components[0], navRow(guildId).components[1]
           )
         ]
@@ -122,21 +103,11 @@ async function renderStep(guildId, step, guild) {
     }
 
     case 5: {
-      const current = config.TRANSCRIPT_CHANNEL_ID;
-      const embed = wizardEmbed(guildId, 'Step 5: Transcript Channel', [
-        'Closed ticket transcripts get posted here.',
-        current ? `Current: <#${current}>` : 'Not set.',
-        '',
-        'Click **Enter ID** below to set the channel, or **Skip**.'
-      ].join('\n'));
       return {
-        embeds: [embed],
+        embeds: [wizardEmbed(guildId, 'Step 5', 'This step has been removed.')],
         components: [
           new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('setup:id:TRANSCRIPT_CHANNEL_ID').setLabel('Enter Channel ID').setStyle(ButtonStyle.Primary)
-          ),
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('setup:step:6').setLabel('Skip →').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('setup:step:6').setLabel('Next →').setStyle(ButtonStyle.Success),
             navRow(guildId).components[0], navRow(guildId).components[1]
           )
         ]
@@ -144,16 +115,11 @@ async function renderStep(guildId, step, guild) {
     }
 
     case 6: {
-      const supportChan = config.supportPanel.channelId;
-      const embed = wizardEmbed(guildId, 'Step 6: Post Support Panel', [
-        supportChan ? `Post the ticket button in <#${supportChan}>?` : 'No support channel set. Set one in Step 3 first, or skip and do it from the dashboard.'
-      ].join('\n'));
       return {
-        embeds: [embed],
+        embeds: [wizardEmbed(guildId, 'Step 6', 'This step has been removed.')],
         components: [
           new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('setup:step:6:post').setLabel('Post Now').setStyle(ButtonStyle.Success).setDisabled(!supportChan),
-            new ButtonBuilder().setCustomId('setup:step:7').setLabel('Skip →').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('setup:step:7').setLabel('Next →').setStyle(ButtonStyle.Success),
             navRow(guildId).components[0], navRow(guildId).components[1]
           )
         ]
@@ -162,7 +128,7 @@ async function renderStep(guildId, step, guild) {
 
     case 7: {
       const embed = wizardEmbed(guildId, 'Step 7: How Many Wings?', [
-        'Wings (departments) organise tickets into categories like Assistants, Moderation, HR.',
+        'Wings organise staff into categories like Assistants, Moderation, HR.',
         '',
         'Each wing needs an existing **category channel** in your server.',
         'You can add more later from the Hierarchy panel.'
@@ -319,7 +285,7 @@ async function renderStandardStep(guildId, step, guild) {
           const numbered = rs.filter((r) => !r.is_lead).sort((a, b) => (a.rank || 0) - (b.rank || 0));
           lines.push(`**${w.label}**:${lead ? ' Lead: <@&' + lead.role_id + '>' : ' *no lead*'}${numbered.length ? ' Roles: ' + numbered.map((r) => '<@&' + r.role_id + '> (r' + r.rank + ')').join(', ') : ' *no roles*'}`);
         }
-        lines.push('', '**Command Policies** control what each wing can do in tickets (reply, close, etc.).');
+        lines.push('', 'Roles with fake permissions grant command access.');
         return lines.join('\n');
       },
       buttons: () => {
@@ -329,11 +295,6 @@ async function renderStandardStep(guildId, step, guild) {
         row1.addComponents(
           new ButtonBuilder().setCustomId('setup:id:leadCategoryRole').setLabel('Set Lead Cat Role').setStyle(ButtonStyle.Primary)
         );
-        if (wings.length) {
-          row1.addComponents(
-            new ButtonBuilder().setCustomId('setup:cmdpolicy').setLabel('Command Policies').setStyle(ButtonStyle.Primary)
-          );
-        }
         btns.push(row1);
         btns.push(new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('setup:step:17').setLabel('Next →').setStyle(ButtonStyle.Success),
@@ -344,22 +305,19 @@ async function renderStandardStep(guildId, step, guild) {
     },
 
     17: {
-      title: 'Step 17: Ticket Access by Wing',
+      title: 'Step 17: Wing Categories',
       desc: () => {
         const wings = stateManager.getWings(guildId);
         if (!wings.length) return 'No wings configured. Use **Next** to continue.';
         const lines = [
-          'Each wing\'s roles can **reply/close** only in their own tickets by default.',
-          'Wings marked as **global** can access ALL tickets.',
-          'Internals is always global.',
+          'Assign category channels to each wing for organisation.',
           '',
           '**Current config:**'
         ];
         for (const w of wings) {
-          const isGlobal = stateManager.getGuildSetting(guildId, `branch_${w.id}_global`, '') === 'true';
           const wRoles = stateManager.getWingRoles(guildId, w.id);
           const roleStr = wRoles.length ? wRoles.map((r) => '<@&' + r.role_id + '>').join(', ') : '*no roles*';
-          lines.push(`**${w.label}**${isGlobal ? ' 🌐 **GLOBAL**' : ''} — ${roleStr}`);
+          lines.push(`**${w.label}** — ${roleStr}`);
         }
         lines.push('', 'Click a wing below to toggle its global access, or **Next**.');
         return lines.join('\n');
@@ -409,44 +367,24 @@ async function renderStandardStep(guildId, step, guild) {
     },
 
     19: {
-      title: 'Step 19: Performance Plans',
-      desc: () => {
-        const cur = stateManager.getGuildSetting(guildId, 'PP_CHANNEL_ID', '');
-        return [
-          'Performance plans track staff improvement with goals, due dates, and notes.',
-          '',
-          cur ? `Performance plan log channel: <#${cur}> ✅` : 'Performance plan log channel: Not set.',
-          '',
-          'Staff are notified via DM when a plan is started/completed.'
-        ].join('\n');
-      },
-      select: 'PP_CHANNEL_ID',
-      next: 20,
-      skip: 20
+      title: 'Step 19',
+      desc: () => 'This step has been removed.',
+      next: 22,
+      skip: 22
     },
 
     20: {
-      title: 'Step 20: Saved Snippets',
-      desc: () => 'Saved snippets are canned replies staff can use (e.g. hi, wait, askproof).\n\nClick **Add Snippets** to create some, or **Next**.',
-      buttons: () => [
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('setup:step:20:snippets').setLabel('Add Snippets').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId('setup:step:21').setLabel('Next →').setStyle(ButtonStyle.Success),
-          navRow(guildId).components[0], navRow(guildId).components[1]
-        )
-      ]
+      title: 'Step 20',
+      desc: () => 'This step has been removed.',
+      next: 22,
+      skip: 22
     },
 
     21: {
-      title: 'Step 21: Command Aliases',
-      desc: () => 'Configure command aliases (e.g. `?r` = reply, `?s` = snippets).\n\nClick **Edit** to review and change them, or **Next**.',
-      buttons: () => [
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('setup:step:21:aliases').setLabel('Edit').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId('setup:step:22').setLabel('Next →').setStyle(ButtonStyle.Success),
-          navRow(guildId).components[0], navRow(guildId).components[1]
-        )
-      ]
+      title: 'Step 21',
+      desc: () => 'This step has been removed.',
+      next: 22,
+      skip: 22
     },
 
     22: {
@@ -625,30 +563,10 @@ async function renderStandardStep(guildId, step, guild) {
     },
 
     61: {
-      title: 'Step 61: Applications',
-      desc: () => {
-        const hasSecrets = config.reviewer.enabled;
-        if (!hasSecrets) return 'Google/Gemini secrets not configured in `.env`. Applications cannot run right now. Set `GOOGLE_FORM_ID`, `GEMINI_API_KEY`, and the Google OAuth vars to enable this.';
-        const reviewChan = stateManager.getGuildSetting(guildId, 'APPS_REVIEW_CHANNEL_ID', '');
-        const approveRole = stateManager.getGuildSetting(guildId, 'APPS_APPROVED_ROLE_ID', '');
-        const ghostChan = stateManager.getGuildSetting(guildId, 'APPS_GHOST_PING_CHANNEL_ID', '');
-        return [
-          'Configure how staff applications are reviewed.',
-          '',
-          reviewChan ? `Review channel: <#${reviewChan}> ✅` : 'Review channel: Not set',
-          approveRole ? `Approved role: <@&${approveRole}> ✅` : 'Approved role: Not set',
-          ghostChan ? `Ghost ping channel: <#${ghostChan}> ✅` : 'Ghost ping channel: Not set',
-          '',
-          'Click **Configure** to set up, or **Next**.'
-        ].filter(Boolean).join('\n');
-      },
-      buttons: () => [
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('setup:step:61:apps').setLabel('Configure').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId('setup:step:62').setLabel('Next →').setStyle(ButtonStyle.Success),
-          navRow(guildId).components[0], navRow(guildId).components[1]
-        )
-      ]
+      title: 'Step 61',
+      desc: () => 'This step has been removed.',
+      next: 62,
+      skip: 62
     },
 
     62: {
@@ -682,8 +600,6 @@ async function renderStandardStep(guildId, step, guild) {
         checks.push(config.discordToken ? '✅ Bot token configured' : '❌ Bot token missing');
         checks.push(config.guildId ? `✅ Guild ID: ${config.guildId}` : '❌ Guild ID not set in .env');
         checks.push(getPrefix(guildId) ? `✅ Prefix: \`${getPrefix(guildId)}\`` : '❌ Prefix not set');
-        checks.push(config.supportPanel.channelId ? `✅ Support channel: <#${config.supportPanel.channelId}>` : '⚠️ No support channel');
-        checks.push(config.TRANSCRIPT_CHANNEL_ID ? `✅ Transcript channel: <#${config.TRANSCRIPT_CHANNEL_ID}>` : '⚠️ No transcript channel');
         checks.push(wings.length ? `✅ ${wings.length} wings configured` : '⚠️ No wings configured');
 
         for (const w of wings) {
@@ -718,8 +634,6 @@ async function renderStandardStep(guildId, step, guild) {
           '',
           '**Summary:**',
           `• Prefix: \`${getPrefix(guildId)}\``,
-          config.supportPanel.channelId ? `• Support: <#${config.supportPanel.channelId}>` : '',
-          config.TRANSCRIPT_CHANNEL_ID ? `• Transcripts: <#${config.TRANSCRIPT_CHANNEL_ID}>` : '',
           wings.length ? `• ${wings.length} wings configured` : '',
           config.style.color ? `• Embed colour: \`#${config.style.color.toString(16)}\`` : '',
           '',

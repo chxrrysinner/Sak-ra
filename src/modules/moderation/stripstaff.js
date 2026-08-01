@@ -19,6 +19,10 @@ async function handlePrefixCommand(message, args, guildId) {
     await message.reply(hierarchy.message);
     return;
   }
+  if (hasProtectedRole(member, guildId)) {
+    await message.reply('that user is protected.');
+    return;
+  }
 
   try {
     // Collect all staff-associated roles: hierarchy roles, category roles, lead cat role
@@ -56,6 +60,10 @@ async function handleSlashCommand(interaction) {
   const hierarchy = checkHierarchy(interaction.member, member);
   if (!hierarchy.allowed) {
     await interaction.reply({ content: hierarchy.message, ephemeral: true });
+    return;
+  }
+  if (hasProtectedRole(member, guildId)) {
+    await interaction.reply({ content: 'that user is protected.', ephemeral: true });
     return;
   }
 

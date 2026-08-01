@@ -219,6 +219,20 @@ function extractUserAndReason(args) {
   return { userId, reason };
 }
 
+function getProtectedRoleIds(guildId) {
+  const guildRaw = stateManager.getGuildSetting(guildId, 'PBAN_PROTECTED_ROLE_IDS', '');
+  const guildIds = guildRaw ? guildRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const configIds = config.pban.protectedRoleIds;
+  return [...new Set([...configIds, ...guildIds])];
+}
+
+function hasProtectedRole(member, guildId) {
+  if (!member) return false;
+  const roleIds = getProtectedRoleIds(guildId);
+  if (roleIds.length === 0) return false;
+  return member.roles.cache.some(r => roleIds.includes(r.id));
+}
+
 function getSuccessResponse(guildId) {
   return stateManager.getGuildSetting(guildId, 'success_response', '👍') || '👍';
 }
@@ -227,6 +241,6 @@ export {
   caseEmbed, moderationDMEmbed, sendModerationDM,
   postModlog, postDocumentsChannel, handleEvidenceCollection, runModAction,
   parseDuration, formatDuration, checkHierarchy, extractUserAndReason,
-  getSuccessResponse,
+  getSuccessResponse, getProtectedRoleIds, hasProtectedRole,
   ACTION_LABELS, ACTION_COLORS
 };

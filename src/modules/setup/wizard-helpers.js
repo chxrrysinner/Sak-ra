@@ -88,10 +88,6 @@ const ALL_PERM_FLAGS = [
   { flag: 'staff.strikesOthers', label: 'View Others Strikes' },
   { flag: 'staff.removeStrike', label: 'Remove Strikes' },
   { flag: 'staff.breaks.manage', label: 'Manage Staff Breaks' },
-  { flag: 'staff.performancePlans', label: 'Manage Performance Plans' },
-  { flag: 'tickets.forceClose', label: 'Force Close Tickets' },
-  { flag: 'tickets.start', label: 'Start Tickets Remotely' },
-  { flag: 'tickets.overrideClaims', label: 'Override Ticket Claims' },
   { flag: 'security.pban', label: 'Start PBAN Proposals' },
   { flag: 'security.addproof', label: 'Add Ban Proof' },
   { flag: 'admin.hideMessage', label: 'Hide Bot Messages' }

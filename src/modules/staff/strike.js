@@ -1,11 +1,12 @@
 import stateManager from '../../core/state.js';
 import { findGuild } from '../../bridge.js';
 import client from '../../core/client.js';
+import config from '../../core/config.js';
 import { styledEmbed, trimTo } from '../../core/embeds.js';
 import { staffRoleHierarchyIds, memberHasPermission } from '../../core/permissions.js';
 import { strikeRecordsFor } from './shared.js';
 
-const ROLE_POLICY_FILE = process.env.ROLE_POLICY_FILE || './role-policy.json';
+const ROLE_POLICY_FILE =       config.paths.rolePolicyFile || './role-policy.json';
 
 async function giveStrike(author, targetUser, reason, guild) {
   const hierarchyRoleIds = staffRoleHierarchyIds();
@@ -46,7 +47,7 @@ async function giveStrike(author, targetUser, reason, guild) {
 async function handleSlashCommand(interaction) {
   const allowed = interaction.member && memberHasPermission(interaction.member, 'staff.strike');
   if (!allowed) {
-    await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+    await interaction.reply({ content: '\u200b', ephemeral: true }).catch(() => {});
     return;
   }
 
@@ -66,10 +67,7 @@ async function handleSlashCommand(interaction) {
 }
 
 async function handlePrefixCommand(message, args, guildId) {
-  if (!message.member || !memberHasPermission(message.member, 'staff.strike')) {
-    await message.reply('You do not have permission to use this command.');
-    return;
-  }
+  if (!message.member || !memberHasPermission(message.member, 'staff.strike')) return;
 
   const hierarchyRoleIds = staffRoleHierarchyIds();
   if (!hierarchyRoleIds.length) {

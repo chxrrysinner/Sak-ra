@@ -126,6 +126,12 @@ const stripstaffSlashCommand = new SlashCommandBuilder()
   .addUserOption((opt) => opt.setName('user').setDescription('User to strip').setRequired(true))
   .addStringOption((opt) => opt.setName('reason').setDescription('Reason').setRequired(false));
 
+const reasonSlashCommand = new SlashCommandBuilder()
+  .setName('reason')
+  .setDescription("Change a moderation case's reason")
+  .addIntegerOption((opt) => opt.setName('case_id').setDescription('Case ID').setRequired(true))
+  .addStringOption((opt) => opt.setName('reason').setDescription('New reason').setRequired(true));
+
 export default {
   name: 'moderation',
   version: '2.0.0',
@@ -161,7 +167,8 @@ export default {
     { command: 'unban', handler: './unban.js', requiredFakePermission: 'banMembers' },
     { command: 'unwarn', handler: './unwarn.js', requiredFakePermission: 'moderateMembers' },
     { command: 'stripstaff', handler: './stripstaff.js', requiredFakePermission: 'administrator' },
-    { command: 'restorestaff', handler: './restorestaff.js', requiredFakePermission: 'administrator' }
+    { command: 'restorestaff', handler: './restorestaff.js', requiredFakePermission: 'administrator' },
+    { command: 'reason', handler: './reason.js', requiredFakePermission: 'moderateMembers' }
   ],
   slashCommands: [
     { name: 'ban', handler: './ban.js', data: banSlashCommand },
@@ -188,13 +195,17 @@ export default {
       .addUserOption((opt) => opt.setName('user').setDescription('User to restore').setRequired(true))
       .addStringOption((opt) => opt.setName('reason').setDescription('Reason').setRequired(false))
     },
+    { name: 'reason', handler: './reason.js', data: reasonSlashCommand },
     { name: 'setupjail', handler: './setupjail.js', data: new SlashCommandBuilder()
       .setName('setupjail')
       .setDescription('Set up the jail role and channel, then configure all channel permissions')
       .addChannelOption((opt) => opt.setName('channel').setDescription('Jail channel (defaults to current)').setRequired(false))
     }
   ],
-  components: { buttons: [], selectMenus: [], modals: [] },
+  componentHandlers: {
+    'mod_case_select': './case.js'
+  },
+  components: { buttons: [], selectMenus: ['mod_case_select'], modals: [] },
   stateTables: ['mod_cases', 'tempbans'],
   onLoad: async (core) => {
     const mod = await import('./shared.js');

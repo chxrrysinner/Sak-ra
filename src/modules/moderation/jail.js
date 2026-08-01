@@ -1,9 +1,10 @@
 import { EmbedBuilder } from 'discord.js';
 import stateManager from '../../core/state.js';
-import { getSuccessResponse, sendModerationDM, runModAction, checkHierarchy, extractUserAndReason } from './shared.js';
+import { getSuccessResponse, sendModerationDM, runModAction, checkHierarchy, extractUserAndReason, hasProtectedRole } from './shared.js';
 import config from '../../core/config.js';
 import client from '../../core/client.js';
 import { getPrefix } from '../../core/prefix.js';
+import { staffRoleHierarchyIds, memberHasAnyCachedRole } from '../../core/permissions.js';
 
 const JAIL_ROLE_SETTING = 'jail_role_id';
 const JAIL_CHANNEL_SETTING = 'jail_channel_id';
@@ -32,7 +33,7 @@ async function handlePrefixCommand(message, args, guildId) {
 
   const { userId, reason } = extractUserAndReason(args);
   if (!userId) {
-    await message.reply('Usage: `jail <@user> [reason]`\n`jail setup` — create jail role\n`jail release <@user> [reason]` — release from jail');
+    await message.reply('Usage: `jail <@user> [reason]` — jail a member\n`jail release <@user> [reason]` — release from jail\n`setupjail` — configure jail role and channel');
     return;
   }
 
@@ -44,6 +45,17 @@ async function handlePrefixCommand(message, args, guildId) {
   const hierarchy = checkHierarchy(message.member, member);
   if (!hierarchy.allowed) {
     await message.reply(hierarchy.message);
+    return;
+  }
+
+  if (hasProtectedRole(member, guildId)) {
+    await message.reply('that user is protected.');
+    return;
+  }
+
+  const staffRoleIds = staffRoleHierarchyIds();
+  if (staffRoleIds.length && memberHasAnyCachedRole(member, staffRoleIds)) {
+    await message.reply('you cannot jail a staff member.');
     return;
   }
 
@@ -65,6 +77,7 @@ async function handlePrefixCommand(message, args, guildId) {
     await sendModerationDM(userId, 'jail', reason, guildId);
     await runModAction(guildId, userId, message.author.id, 'jail', reason, {}, message.guild);
     await message.channel.send(getSuccessResponse(guildId));
+    await message.channel.send(`<@${userId}> you have been jailed.`).catch(() => null);
   } catch (error) {
     await message.channel.send('nuuu');
   }
@@ -197,9 +210,20 @@ async function handleSlashCommand(interaction) {
     return;
   }
 
+  if (hasProtectedRole(member, interaction.guildId)) {
+    await interaction.reply({ content: 'that user is protected.', ephemeral: true });
+    return;
+  }
+
+  const staffRoleIds = staffRoleHierarchyIds();
+  if (staffRoleIds.length && memberHasAnyCachedRole(member, staffRoleIds)) {
+    await interaction.reply({ content: 'you cannot jail a staff member.', ephemeral: true });
+    return;
+  }
+
   const jailRole = await getJailRole(interaction.guild);
   if (!jailRole) {
-    await interaction.reply({ content: 'Jail role not set up. Use `/jail setup` first.', ephemeral: true });
+    await interaction.reply({ content: 'Jail role not set up. Use `setupjail` first.', ephemeral: true });
     return;
   }
 
@@ -213,6 +237,7 @@ async function handleSlashCommand(interaction) {
     await sendModerationDM(user.id, 'jail', reason, interaction.guildId);
     await runModAction(interaction.guildId, user.id, interaction.user.id, 'jail', reason, {}, interaction.guild);
     await interaction.editReply(getSuccessResponse(guildId));
+    await interaction.followUp({ content: `<@${user.id}> you have been jailed.`, allowedMentions: { users: [user.id] } }).catch(() => null);
   } catch (error) {
     await interaction.editReply('nuuu');
   }

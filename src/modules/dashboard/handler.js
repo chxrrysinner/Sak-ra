@@ -9,29 +9,68 @@ import registry from '../../core/registry.js';
 import client from '../../core/client.js';
 
 const dashboardSessions = new Map();
+const dashboardTimeouts = new Map();
 const DASHBOARD_TTL = 10 * 60 * 1000;
 
-function touchSession(messageId) {
-  dashboardSessions.set(messageId, Date.now());
+async function autoExpireSession(messageId) {
+  const entry = dashboardSessions.get(messageId);
+  dashboardSessions.delete(messageId);
+  dashboardTimeouts.delete(messageId);
+  if (!entry?.channelId) return;
+  try {
+    const channel = await client.channels.fetch(entry.channelId).catch(() => null);
+    if (!channel) return;
+    const msg = await channel.messages.fetch(messageId).catch(() => null);
+    if (!msg?.editable) return;
+    await msg.edit({
+      embeds: [new EmbedBuilder().setColor(0xc67a3a).setDescription('ur too slow lol make another db').setTimestamp()],
+      components: []
+    }).catch(() => null);
+  } catch {}
 }
 
-function isSessionExpired(messageId) {
-  const last = dashboardSessions.get(messageId);
-  return last && (Date.now() - last) > DASHBOARD_TTL;
+function scheduleAutoExpire(messageId) {
+  if (dashboardTimeouts.has(messageId)) clearTimeout(dashboardTimeouts.get(messageId));
+  const tid = setTimeout(() => autoExpireSession(messageId), DASHBOARD_TTL);
+  dashboardTimeouts.set(messageId, tid);
+}
+
+function touchSession(messageId, userId, channelId) {
+  if (!messageId) return;
+  const existing = dashboardSessions.get(messageId);
+  dashboardSessions.set(messageId, {
+    userId,
+    channelId: channelId || existing?.channelId,
+    lastActivity: Date.now()
+  });
+  scheduleAutoExpire(messageId);
 }
 
 async function expireSession(interaction) {
-  if (!interaction.message?.id) return false;
-  if (isSessionExpired(interaction.message.id)) {
+  const msgId = interaction.message?.id;
+  if (!msgId) return false;
+
+  const session = dashboardSessions.get(msgId);
+  if (!session || (Date.now() - session.lastActivity) > DASHBOARD_TTL) {
+    dashboardSessions.delete(msgId);
+    dashboardTimeouts.delete(msgId);
+    await interaction.deferUpdate().catch(() => {});
     try {
-      await interaction.update({
+      await interaction.editReply({
         embeds: [new EmbedBuilder().setColor(0xc67a3a).setDescription('ur too slow lol make another db').setTimestamp()],
         components: []
       });
     } catch {}
     return true;
   }
-  touchSession(interaction.message.id);
+
+  if (session.userId !== interaction.user.id) {
+    await interaction.reply({ content: 'nuuu', ephemeral: true }).catch(() => {});
+    return true;
+  }
+
+  session.lastActivity = Date.now();
+  scheduleAutoExpire(msgId);
   return false;
 }
 
@@ -44,28 +83,27 @@ function mainPanel(guildId) {
   const embed = new EmbedBuilder()
     .setColor(0xc67a3a)
     .setTitle(guildName)
-    .setDescription('Hallows Dashboard\nPrefix: `' + prefix + '`\nUse buttons to navigate.')
+    .setDescription('Hallows Dashboard\nPrefix: `' + prefix + '`\nNavigate using the buttons below.')
     .setTimestamp();
   if (guildIcon) embed.setThumbnail(guildIcon);
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:general').setLabel('General').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:hierarchy').setLabel('Hierarchy').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:permissions').setLabel('Permissions').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:moderation').setLabel('Moderation').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId('dashboard:channels').setLabel('📡 Channels').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:roles').setLabel('👤 Roles').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:hierarchy').setLabel('🏛 Hierarchy').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:permissions').setLabel('🔐 Permissions').setStyle(ButtonStyle.Secondary)
   );
 
   const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:antiraid').setLabel('Anti-Raid').setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId('dashboard:antinuke').setLabel('Anti-Nuke').setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId('dashboard:levels').setLabel('Leveling').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('dashboard:starboard').setLabel('Starboard').setStyle(ButtonStyle.Primary)
+    new ButtonBuilder().setCustomId('dashboard:moderation').setLabel('🛡 Moderation').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('dashboard:security').setLabel('🔒 Security').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('dashboard:engagement').setLabel('🎮 Engagement').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('dashboard:policies').setLabel('📋 Policies').setStyle(ButtonStyle.Secondary)
   );
 
   const row3 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:policies').setLabel('Policies').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:autoroles').setLabel('Auto Roles').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:diagnostics').setLabel('Diagnostics').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId('dashboard:settings').setLabel('⚙ Settings').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:diagnostics').setLabel('🩺 Diagnostics').setStyle(ButtonStyle.Secondary)
   );
 
   return { embeds: [embed], components: [row, row2, row3] };
@@ -76,14 +114,13 @@ function gs(guildId, key, fallback) {
   return val || fallback || null;
 }
 
-function generalPanel(guildId) {
-  const prefix = getPrefix(guildId);
-  const supportChan = gs(guildId, 'SUPPORT_PANEL_CHANNEL_ID');
-  const transcriptChan = gs(guildId, 'TRANSCRIPT_CHANNEL_ID');
-  const approvedRole = gs(guildId, 'APPS_APPROVED_ROLE_ID');
-  const ghostChan = gs(guildId, 'APPS_GHOST_PING_CHANNEL_ID');
+function channelsPanel(guildId) {
   const docChan = gs(guildId, 'DOCUMENTS_CHANNEL_ID');
-  const jailRole = gs(guildId, 'jail_role_id');
+  const modlogChan = stateManager.getModlogChannel(guildId);
+  const pbanProp = gs(guildId, 'PBAN_PROPOSAL_CHANNEL_ID');
+  const pbanLog = gs(guildId, 'PBAN_LOG_CHANNEL_ID');
+  const breakChan = gs(guildId, 'BREAK_REQUEST_CHANNEL_ID');
+  const autoMod = gs(guildId, 'ANTI_BOT_AUTOMOD_CHANNEL_ID');
   const jailChan = gs(guildId, 'jail_channel_id');
 
   const statsExcluded = gs(guildId, 'stats_excluded_channels', '[]');
@@ -92,91 +129,72 @@ function generalPanel(guildId) {
 
   const embed = new EmbedBuilder()
     .setColor(0xc67a3a)
-    .setTitle('General Settings')
+    .setTitle('📡 Channel Configurations')
     .addFields(
-      { name: 'Command Prefix', value: '`' + prefix + '`', inline: false },
-      { name: 'Support Panel Channel', value: supportChan ? '<#' + supportChan + '>' : 'Not set', inline: true },
-      { name: 'Transcript Channel', value: transcriptChan ? '<#' + transcriptChan + '>' : 'Not set', inline: true },
       { name: 'Documents Evidence', value: docChan ? '<#' + docChan + '>' : 'Not set', inline: true },
-      { name: 'Approved Applicant Role', value: approvedRole ? '<@&' + approvedRole + '>' : 'Not set', inline: true },
-      { name: 'Ghost Ping Channel', value: ghostChan ? '<#' + ghostChan + '>' : 'Not set', inline: true },
-      { name: 'Jail Role', value: jailRole ? '<@&' + jailRole + '>' : 'Not set', inline: true },
+      { name: 'Modlog Channel', value: modlogChan ? '<#' + modlogChan + '>' : 'Not set', inline: true },
+      { name: 'PBAN Proposal', value: pbanProp ? '<#' + pbanProp + '>' : 'Not set', inline: true },
+      { name: 'PBAN Log', value: pbanLog ? '<#' + pbanLog + '>' : 'Not set', inline: true },
+      { name: 'Break Request', value: breakChan ? '<#' + breakChan + '>' : 'Not set', inline: true },
+      { name: 'Automod Detection', value: autoMod ? '<#' + autoMod + '>' : 'Not set', inline: true },
       { name: 'Jail Channel', value: jailChan ? '<#' + jailChan + '>' : 'Not set', inline: true },
       { name: 'Stats Excluded', value: statsExcludedStr, inline: false }
     )
     .setTimestamp();
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:general:prefix').setLabel('Change Prefix').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('dashboard:general:support_channel').setLabel('Support').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:general:transcript_channel').setLabel('Transcript').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:general:documents').setLabel('Documents').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId('dashboard:general:documents').setLabel('Documents').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:general:edit_modlog').setLabel('Modlog').setStyle(ButtonStyle.Secondary)
   );
 
   const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:general:stats_exclude').setLabel('Stats Exc').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:general:success_response').setLabel('Success').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:general:support_dm').setLabel('Support DM').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('dashboard:general:more').setLabel('More...').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:general:edit_pban_prop').setLabel('PBAN Prop').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:general:edit_pban_log').setLabel('PBAN Log').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:general:edit_break_chan').setLabel('Break').setStyle(ButtonStyle.Secondary)
+  );
+
+  const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('dashboard:channels:set_automod').setLabel('Automod').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:channels:set_jail_channel').setLabel('Jail Chan').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:general:stats_exclude').setLabel('Stats Exc').setStyle(ButtonStyle.Secondary)
+  );
+
+  const row4 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('dashboard:main').setLabel('Back').setStyle(ButtonStyle.Secondary)
   );
 
-  return { embeds: [embed], components: [row, row2] };
+  return { embeds: [embed], components: [row, row2, row3, row4] };
 }
 
-function generalMorePanel(guildId) {
-  const approvedRole = gs(guildId, 'APPS_APPROVED_ROLE_ID');
-  const ghostChan = gs(guildId, 'APPS_GHOST_PING_CHANNEL_ID');
-  const breakChan = gs(guildId, 'BREAK_REQUEST_CHANNEL_ID');
+function rolesPanel(guildId) {
   const breakRole = gs(guildId, 'ON_BREAK_ROLE_ID');
-  const pbanProp = gs(guildId, 'PBAN_PROPOSAL_CHANNEL_ID');
-  const pbanLog = gs(guildId, 'PBAN_LOG_CHANNEL_ID');
-  const autoMod = gs(guildId, 'ANTI_BOT_AUTOMOD_CHANNEL_ID');
-  const pplanChan = gs(guildId, 'PP_CHANNEL_ID');
-  const modlogChan = stateManager.getModlogChannel(guildId);
+  const jailRole = gs(guildId, 'jail_role_id');
   const demoExempt = gs(guildId, 'DEMOTE_EXEMPT_ROLES', '');
+  const pbanProt = gs(guildId, 'PBAN_PROTECTED_ROLE_IDS', '');
 
   const embed = new EmbedBuilder()
     .setColor(0xc67a3a)
-    .setTitle('Advanced Settings')
+    .setTitle('👤 Role Configurations')
     .addFields(
-      { name: 'Approved Role', value: approvedRole ? '<@&' + approvedRole + '>' : 'Not set', inline: true },
-      { name: 'Ghost Ping Chan', value: ghostChan ? '<#' + ghostChan + '>' : 'Not set', inline: true },
-      { name: 'Break Request Chan', value: breakChan ? '<#' + breakChan + '>' : 'Not set', inline: true },
       { name: 'On Break Role', value: breakRole ? '<@&' + breakRole + '>' : 'Not set', inline: true },
-      { name: 'PBAN Proposal Chan', value: pbanProp ? '<#' + pbanProp + '>' : 'Not set', inline: true },
-      { name: 'PBAN Log Chan', value: pbanLog ? '<#' + pbanLog + '>' : 'Not set', inline: true },
-      { name: 'Automod Chan', value: autoMod ? '<#' + autoMod + '>' : 'Not set', inline: true },
-      { name: 'Perf Plan Chan', value: pplanChan ? '<#' + pplanChan + '>' : 'Not set', inline: true },
-      { name: 'Modlog Chan', value: modlogChan ? '<#' + modlogChan + '>' : 'Not set', inline: true },
-      { name: 'Demote Exempt', value: demoExempt ? demoExempt.split(',').map((id) => '<@&' + id.trim() + '>').join(', ') : 'Not set', inline: false }
+      { name: 'Jail Role', value: jailRole ? '<@&' + jailRole + '>' : 'Not set', inline: true },
+      { name: 'Demote Exempt Roles', value: demoExempt ? demoExempt.split(',').map((id) => '<@&' + id.trim() + '>').join(', ') : 'Not set', inline: false },
+      { name: 'PBAN Protected Roles', value: pbanProt ? pbanProt.split(',').map((id) => '<@&' + id.trim() + '>').join(', ') : 'Not set', inline: false }
     )
     .setTimestamp();
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:general:edit_break_chan').setLabel('Break Chan').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('dashboard:general:edit_break_role').setLabel('Break Role').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:general:edit_pban_prop').setLabel('PBAN Prop').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:general:edit_pban_log').setLabel('PBAN Log').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:general:edit_pban_prot').setLabel('PBAN Prot').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId('dashboard:roles:set_jail_role').setLabel('Jail Role').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:general:edit_demote').setLabel('Demote').setStyle(ButtonStyle.Secondary)
   );
 
   const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:general:edit_pban_appeal').setLabel('PBAN Appeal').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:general:edit_modlog').setLabel('Modlog').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:general:edit_pplan').setLabel('Perf Plan').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:general:edit_demote').setLabel('Demote Exempt').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:general:pban_weights').setLabel('PBAN Wt').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId('dashboard:general:edit_pban_prot').setLabel('PBAN Prot').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:main').setLabel('Back').setStyle(ButtonStyle.Secondary)
   );
 
-  const row3 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:general:apps').setLabel('Apps').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:general:appearance').setLabel('Appearance').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:autoroles').setLabel('Auto Roles').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('dashboard:general').setLabel('Back').setStyle(ButtonStyle.Secondary)
-  );
-
-  return { embeds: [embed], components: [row, row2, row3] };
+  return { embeds: [embed], components: [row, row2] };
 }
 
 function hierarchyPanel(guildId) {
@@ -400,25 +418,49 @@ function fakePermsPanel(guildId, page) {
 
 function moderationPanel(guildId) {
   const modlogChannel = stateManager.getModlogChannel(guildId);
-  const recentCases = stateManager.getModCases(guildId, null, null, 5);
+  const jailRole = gs(guildId, 'jail_role_id');
+  const jailChan = gs(guildId, 'jail_channel_id');
+  const pbanProp = gs(guildId, 'PBAN_PROPOSAL_CHANNEL_ID');
+  const pbanLog = gs(guildId, 'PBAN_LOG_CHANNEL_ID');
+  const pbanProt = gs(guildId, 'PBAN_PROTECTED_ROLE_IDS', '');
+  const pbanAppeal = gs(guildId, 'PBAN_APPEALS_INVITE', '');
+  const autoMod = gs(guildId, 'ANTI_BOT_AUTOMOD_CHANNEL_ID');
 
   const embed = new EmbedBuilder()
     .setColor(0xc67a3a)
-    .setTitle('Moderation')
-    .addFields({ name: 'Modlog Channel', value: modlogChannel ? '<#' + modlogChannel + '>' : 'Not set', inline: false })
+    .setTitle('🛡 Moderation')
+    .addFields(
+      { name: 'Modlog Channel', value: modlogChannel ? '<#' + modlogChannel + '>' : 'Not set', inline: true },
+      { name: 'Jail Role', value: jailRole ? '<@&' + jailRole + '>' : 'Not set', inline: true },
+      { name: 'Jail Channel', value: jailChan ? '<#' + jailChan + '>' : 'Not set', inline: true },
+      { name: 'PBAN Proposal', value: pbanProp ? '<#' + pbanProp + '>' : 'Not set', inline: true },
+      { name: 'PBAN Log', value: pbanLog ? '<#' + pbanLog + '>' : 'Not set', inline: true },
+      { name: 'PBAN Protected', value: pbanProt ? pbanProt.split(',').map((id) => '<@&' + id.trim() + '>').join(', ') : 'Not set', inline: false },
+      { name: 'PBAN Appeal', value: pbanAppeal || 'Not set', inline: true },
+      { name: 'Automod Channel', value: autoMod ? '<#' + autoMod + '>' : 'Not set', inline: true }
+    )
     .setTimestamp();
 
-  if (recentCases.length) {
-    const lines = recentCases.map((c) => '#' + c.id + ' - **' + c.action + '** - <@' + c.user_id + '> - ' + new Date(c.created_at).toLocaleDateString());
-    embed.addFields({ name: 'Recent Cases', value: lines.join('\n').substring(0, 1000), inline: false });
-  }
-
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:moderation:channel').setLabel('Set Channel').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('dashboard:moderation:channel').setLabel('Modlog').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:roles:set_jail_role').setLabel('Jail Role').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:channels:set_jail_channel').setLabel('Jail Chan').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:channels:set_automod').setLabel('Automod').setStyle(ButtonStyle.Secondary)
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('dashboard:general:edit_pban_prop').setLabel('PBAN Prop').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:general:edit_pban_log').setLabel('PBAN Log').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:general:edit_pban_prot').setLabel('PBAN Prot').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:general:edit_pban_appeal').setLabel('PBAN Appeal').setStyle(ButtonStyle.Secondary)
+  );
+
+  const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('dashboard:general:pban_weights').setLabel('PBAN Wt').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('dashboard:main').setLabel('Back').setStyle(ButtonStyle.Secondary)
   );
 
-  return { embeds: [embed], components: [row] };
+  return { embeds: [embed], components: [row, row2, row3] };
 }
 
 function antiraidPanel(guildId) {
@@ -550,18 +592,14 @@ function policiesPanel() {
   const embed = new EmbedBuilder()
     .setColor(0xc67a3a)
     .setTitle('Server Policies')
-    .setDescription('Edit command permissions, ticket branch policies, and saved snippets.')
+    .setDescription('Edit command permissions and staff role policy.')
     .setTimestamp();
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('dashboard:policies:commands').setLabel('Command Perms').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('dashboard:policies:branches').setLabel('Branch Policy').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('dashboard:policies:rolepolicy').setLabel('Role Policy').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('dashboard:policies:snippets').setLabel('Saved Snippets').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('dashboard:policies:modmail').setLabel('Modmail Cmd').setStyle(ButtonStyle.Primary)
+    new ButtonBuilder().setCustomId('dashboard:policies:rolepolicy').setLabel('Role Policy').setStyle(ButtonStyle.Primary)
   );
   const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:policies:aliases').setLabel('Cmd Aliases').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('dashboard:main').setLabel('Back').setStyle(ButtonStyle.Secondary)
   );
 
@@ -590,26 +628,6 @@ function policyCommandsPanel(guildId) {
   return { embeds: [embed], components: [row] };
 }
 
-function policyBranchesPanel(guildId) {
-  const bp = pj(guildId, '_policy_branches', {});
-  const lines = Object.entries(bp).map(([branch, perms]) => {
-    const permLines = Object.entries(perms || {}).map(([action, roles]) => '  **' + action + '** — ' + (Array.isArray(roles) ? roles.map((r) => '`' + r + '`').join(', ') : String(roles))).join('\n');
-    return '**' + branch + '**\n' + permLines;
-  });
-  const embed = new EmbedBuilder()
-    .setColor(0xc67a3a)
-    .setTitle('Ticket Branch Policy')
-    .setDescription(lines.length ? lines.join('\n\n').substring(0, 4000) : 'No branch policy configured.')
-    .setTimestamp();
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:policies:branches:edit').setLabel('Edit JSON').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('dashboard:policies').setLabel('Back').setStyle(ButtonStyle.Secondary)
-  );
-
-  return { embeds: [embed], components: [row] };
-}
-
 function policyRolePanel(guildId) {
   const json = pj(guildId, '_role_policy', config.policy.rolePolicy || {});
   const lines = [];
@@ -627,52 +645,6 @@ function policyRolePanel(guildId) {
     new ButtonBuilder().setCustomId('dashboard:policies:rolepolicy:edit').setLabel('Edit JSON').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('dashboard:policies').setLabel('Back').setStyle(ButtonStyle.Secondary)
   );
-  return { embeds: [embed], components: [row] };
-}
-
-function policyModmailPanel(guildId) {
-  const json = pj(guildId, '_modmail_policy', config.policy.modmailCommandPolicy || {});
-  const embed = new EmbedBuilder()
-    .setColor(0xc67a3a)
-    .setTitle('Modmail Command Policy')
-    .setDescription('Controls which commands work in which ticket wings. Edit the JSON to configure.')
-    .setTimestamp();
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:policies:modmail:edit').setLabel('Edit JSON').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('dashboard:policies').setLabel('Back').setStyle(ButtonStyle.Secondary)
-  );
-  return { embeds: [embed], components: [row] };
-}
-
-function policyAliasesPanel(guildId) {
-  const aliases = pj(guildId, '_command_aliases', {});
-  const lines = Object.keys(aliases).length ? Object.entries(aliases).map(([k, v]) => '`' + k + '` → `' + v + '`').join('\n') : 'No custom aliases. Defaults from commands.json apply.';
-  const embed = new EmbedBuilder()
-    .setColor(0xc67a3a)
-    .setTitle('Command Aliases')
-    .setDescription(lines)
-    .setTimestamp();
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:policies:aliases:edit').setLabel('Edit JSON').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('dashboard:policies').setLabel('Back').setStyle(ButtonStyle.Secondary)
-  );
-  return { embeds: [embed], components: [row] };
-}
-
-function policySnippetsPanel(guildId) {
-  const ss = pj(guildId, '_policy_snippets', {});
-  const lines = Object.entries(ss).map(([key, s]) => '**' + key + '** — `' + (s.command || '?') + '` — ' + (s.description || '').substring(0, 80));
-  const embed = new EmbedBuilder()
-    .setColor(0xc67a3a)
-    .setTitle('Saved Snippets')
-    .setDescription(lines.length ? lines.join('\n').substring(0, 4000) : 'No snippets configured.')
-    .setTimestamp();
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:policies:snippets:edit').setLabel('Edit JSON').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('dashboard:policies').setLabel('Back').setStyle(ButtonStyle.Secondary)
-  );
-
   return { embeds: [embed], components: [row] };
 }
 
@@ -697,33 +669,7 @@ function autorolesPanel(guildId) {
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('dashboard:autoroles:add').setLabel('Add Role').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('dashboard:general').setLabel('Back').setStyle(ButtonStyle.Secondary)
-  );
-
-  return { embeds: [embed], components: [row] };
-}
-
-function applicationsPanel(guildId) {
-  const reviewChan = gs(guildId, 'APPS_REVIEW_CHANNEL_ID');
-  const approveRole = gs(guildId, 'APPS_APPROVED_ROLE_ID');
-  const ghostChan = gs(guildId, 'APPS_GHOST_PING_CHANNEL_ID');
-
-  const embed = new EmbedBuilder()
-    .setColor(0xc67a3a)
-    .setTitle('Applications Config')
-    .addFields(
-      { name: 'Review Channel', value: reviewChan ? '<#' + reviewChan + '>' : 'Not set', inline: true },
-      { name: 'Approved Role', value: approveRole ? '<@&' + approveRole + '>' : 'Not set', inline: true },
-      { name: 'Ghost Ping Chan', value: ghostChan ? '<#' + ghostChan + '>' : 'Not set', inline: true },
-      { name: 'Google Form ID', value: config.reviewer?.formId ? '`' + config.reviewer.formId + '`' : 'Not set (env)', inline: false }
-    )
-    .setTimestamp();
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:general:apps_review').setLabel('Review Chan').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:general:apps_role').setLabel('Approve Role').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:general:apps_ghost').setLabel('Ghost Ping').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('dashboard:general:more').setLabel('Back').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId('dashboard:main').setLabel('Back').setStyle(ButtonStyle.Secondary)
   );
 
   return { embeds: [embed], components: [row] };
@@ -744,7 +690,7 @@ function pbanWeightsPanel(guildId) {
   }
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:general:more').setLabel('Back').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId('dashboard:moderation').setLabel('Back').setStyle(ButtonStyle.Secondary)
   );
 
   return { embeds: [embed], components: [row] };
@@ -762,7 +708,7 @@ function appearancePanel(guildId) {
     .setTimestamp();
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('dashboard:general:more').setLabel('Back').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId('dashboard:settings').setLabel('Back').setStyle(ButtonStyle.Secondary)
   );
 
   return { embeds: [embed], components: [row] };
@@ -771,14 +717,11 @@ function appearancePanel(guildId) {
 function diagnosticsPanel(guildId) {
   const prefix = getPrefix(guildId);
   const wings = stateManager.getWings(guildId);
-  const supportChan = gs(guildId, 'SUPPORT_PANEL_CHANNEL_ID');
   const modlogChan = stateManager.getModlogChannel(guildId);
-  const guild = globalThis.__HALLOWS_CLIENT__?.guilds?.cache?.get(guildId);
   const modlogSet = modlogChan ? '✅ Modlog channel set' : '⚠️ No modlog channel';
-  const supportSet = supportChan ? '✅ Support channel set' : '⚠️ No support channel';
   const wingSummary = wings.length ? '✅ ' + wings.length + ' wings configured' : '⚠️ No wings configured';
 
-  const lines = ['✅ Bot token configured', '✅ Prefix: `' + prefix + '`', supportSet, modlogSet, wingSummary];
+  const lines = ['✅ Bot token configured', '✅ Prefix: `' + prefix + '`', modlogSet, wingSummary];
   for (const w of wings) {
     const rs = stateManager.getWingRoles(guildId, w.id);
     const lead = rs.find((r) => r.is_lead);
@@ -1053,9 +996,9 @@ function canManage(member) {
   if (member.permissions?.has('Administrator')) return true;
   if (memberHasPermission(member, 'administrator')) return true;
   if (member.permissions?.has('ManageGuild')) return true;
-  // Any staff member with a wing role can use the dashboard
-  const staffIds = staffRoleHierarchyIds();
-  return member.roles?.cache?.some((r) => staffIds.includes(r.id)) || false;
+  // Only Internals wing can use the dashboard
+  const internalIds = staffRoleHierarchyIds('internals');
+  return member.roles?.cache?.some((r) => internalIds.includes(r.id)) || false;
 }
 
 // ── Modal Trigger Builders ──
@@ -1351,10 +1294,6 @@ async function showPolicyEditModal(interaction, policyKey) {
 
   const policyKeys = {
     commands: { gs: '_policy_commands', title: 'Edit Command Permissions', cfg: 'commands' },
-    branches: { gs: '_policy_branches', title: 'Edit Branch Policy', cfg: 'ticketBranchPolicy' },
-    snippets: { gs: '_policy_snippets', title: 'Edit Saved Snippets', cfg: 'savedSnippets' },
-    modmail: { gs: '_modmail_policy', title: 'Edit Modmail Command Policy', cfg: 'modmailCommandPolicy' },
-    aliases: { gs: '_command_aliases', title: 'Edit Command Aliases', cfg: null },
     rolepolicy: { gs: '_role_policy', title: 'Edit Staff Role Policy', cfg: 'rolePolicy' }
   };
   const info = policyKeys[policyKey];
@@ -1415,25 +1354,135 @@ async function showSettingTextModal(interaction, key, label, currentValue) {
 function toggleRaid(interaction) {
   const config = stateManager.getRaidConfig(interaction.guildId);
   stateManager.setRaidConfig(interaction.guildId, { enabled: config.enabled ? 0 : 1 });
-  interaction.update(antiraidPanel(interaction.guildId));
+  interaction.update(securityPanel(interaction.guildId));
 }
 
 function toggleAntinuke(interaction) {
   const config = stateManager.getAntinukeConfig(interaction.guildId);
   stateManager.setAntinukeConfig(interaction.guildId, { enabled: config.enabled ? 0 : 1 });
-  interaction.update(antinukePanel(interaction.guildId));
+  interaction.update(securityPanel(interaction.guildId));
 }
 
 function toggleLevels(interaction) {
   const config = stateManager.getLevelConfig(interaction.guildId);
   stateManager.setLevelConfig(interaction.guildId, { enabled: config.enabled ? 0 : 1 });
-  interaction.update(levelsPanel(interaction.guildId));
+  interaction.update(engagementPanel(interaction.guildId));
 }
 
 function toggleStarboard(interaction) {
   const config = stateManager.getStarboardConfig(interaction.guildId);
   stateManager.setStarboardConfig(interaction.guildId, { enabled: config.enabled ? 0 : 1 });
-  interaction.update(starboardPanel(interaction.guildId));
+  interaction.update(engagementPanel(interaction.guildId));
+}
+
+function engagementPanel(guildId) {
+  const lvl = stateManager.getLevelConfig(guildId);
+  const rewards = stateManager.getLevelRewards(guildId);
+  const sb = stateManager.getStarboardConfig(guildId);
+  const counters = stateManager.getCounters(guildId);
+
+  const embed = new EmbedBuilder()
+    .setColor(0xc67a3a)
+    .setTitle('🎮 Engagement')
+    .addFields(
+      { name: 'Leveling', value: lvl.enabled ? 'Enabled' : 'Disabled', inline: true },
+      { name: 'XP Range', value: lvl.xp_min + '-' + lvl.xp_max, inline: true },
+      { name: 'Cooldown', value: lvl.cooldown_seconds + 's', inline: true },
+      { name: 'Scaling Factor', value: String(lvl.scaling_factor), inline: true },
+      { name: 'Announce', value: lvl.announce_levelup ? 'On' : 'Off', inline: true },
+      { name: '\u200B', value: '\u200B', inline: false },
+      { name: 'Starboard', value: sb.enabled ? 'Enabled' : 'Disabled', inline: true },
+      { name: 'Channel', value: sb.channel_id ? '<#' + sb.channel_id + '>' : 'Not set', inline: true },
+      { name: 'Threshold', value: String(sb.threshold), inline: true },
+      { name: 'Emoji', value: sb.emoji || 'star', inline: true }
+    )
+    .setTimestamp();
+
+  if (rewards.length) {
+    embed.addFields({ name: 'Level Rewards', value: rewards.map((r) => 'Lv ' + r.level + ' <@&' + r.role_id + '>').join('\n'), inline: false });
+  }
+
+  if (counters.length) {
+    embed.addFields({ name: 'Counters', value: counters.map((c) => '<#' + c.channel_id + '> - **' + c.counter_type + '**').join('\n'), inline: false });
+  } else {
+    embed.addFields({ name: 'Counters', value: 'None configured', inline: false });
+  }
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('dashboard:levels:toggle').setLabel(lvl.enabled ? 'Levels Off' : 'Levels On').setStyle(lvl.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('dashboard:levels:config').setLabel('Level Config').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('dashboard:starboard:toggle').setLabel(sb.enabled ? 'Star Off' : 'Star On').setStyle(sb.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('dashboard:starboard:config').setLabel('Star Config').setStyle(ButtonStyle.Primary)
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('dashboard:counters').setLabel('Counters').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('dashboard:main').setLabel('Back').setStyle(ButtonStyle.Secondary)
+  );
+
+  return { embeds: [embed], components: [row, row2] };
+}
+
+function securityPanel(guildId) {
+  const raid = stateManager.getRaidConfig(guildId);
+  const nuke = stateManager.getAntinukeConfig(guildId);
+
+  const embed = new EmbedBuilder()
+    .setColor(0xc67a3a)
+    .setTitle('🔒 Security')
+    .addFields(
+      { name: 'Anti-Raid', value: raid.enabled ? '🟢 Enabled' : '🔴 Disabled', inline: true },
+      { name: 'Join Threshold', value: raid.join_threshold + ' joins', inline: true },
+      { name: 'Window', value: raid.time_window_seconds + 's', inline: true },
+      { name: 'Auto-Unlock', value: raid.auto_lockout_minutes + ' min', inline: true },
+      { name: '\u200B', value: '\u200B', inline: false },
+      { name: 'Anti-Nuke', value: nuke.enabled ? '🟢 Enabled' : '🔴 Disabled', inline: true },
+      { name: 'Ch Delete', value: String(nuke.channel_delete_threshold), inline: true },
+      { name: 'Role Delete', value: String(nuke.role_delete_threshold), inline: true },
+      { name: 'Ban Add', value: String(nuke.ban_add_threshold), inline: true },
+      { name: 'Window', value: nuke.time_window_seconds + 's', inline: true },
+      { name: 'Action', value: nuke.action_on_trigger, inline: true }
+    )
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('dashboard:antiraid:toggle').setLabel(raid.enabled ? 'Raid Off' : 'Raid On').setStyle(raid.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('dashboard:antiraid:config').setLabel('Raid Config').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('dashboard:antinuke:toggle').setLabel(nuke.enabled ? 'Nuke Off' : 'Nuke On').setStyle(nuke.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('dashboard:antinuke:config').setLabel('Nuke Config').setStyle(ButtonStyle.Primary)
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('dashboard:main').setLabel('Back').setStyle(ButtonStyle.Secondary)
+  );
+
+  return { embeds: [embed], components: [row, row2] };
+}
+
+function settingsPanel(guildId) {
+  const prefix = getPrefix(guildId);
+  const successResponse = gs(guildId, 'success_response', '👍');
+
+  const embed = new EmbedBuilder()
+    .setColor(0xc67a3a)
+    .setTitle('⚙ Settings')
+    .addFields(
+      { name: 'Command Prefix', value: '`' + prefix + '`', inline: false },
+      { name: 'Success Response', value: '`' + successResponse + '`', inline: false }
+    )
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('dashboard:general:prefix').setLabel('Prefix').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('dashboard:general:success_response').setLabel('Success Resp').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('dashboard:general:appearance').setLabel('Appearance').setStyle(ButtonStyle.Secondary)
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('dashboard:main').setLabel('Back').setStyle(ButtonStyle.Secondary)
+  );
+
+  return { embeds: [embed], components: [row, row2] };
 }
 
 // ── Command Handlers ──
@@ -1443,19 +1492,24 @@ async function handlePrefixCommand(message, args, guildId) {
     await message.reply('This command can only be used in a server.');
     return;
   }
+  if (!canManage(message.member)) return;
 
   try {
     const sent = await message.reply(mainPanel(guildId));
-    if (sent?.id) touchSession(sent.id);
+    if (sent?.id) touchSession(sent.id, message.author.id, message.channel.id);
   } catch (error) {
     await message.reply('Failed to open dashboard.');
   }
 }
 
 async function handleSlashCommand(interaction) {
+  if (!canManage(interaction.member)) {
+    await interaction.reply({ content: '\u200b', ephemeral: true }).catch(() => {});
+    return;
+  }
   const payload = mainPanel(interaction.guildId);
   const sent = await interaction.reply(payload);
-  if (sent?.id) touchSession(sent.id);
+  if (sent?.id) touchSession(sent.id, interaction.user.id, interaction.channelId);
 }
 
 async function handleDashboardButton(interaction) {
@@ -1463,7 +1517,7 @@ async function handleDashboardButton(interaction) {
   const messageId = interaction.message?.id;
 
   if (await expireSession(interaction)) return;
-  touchSession(messageId);
+  touchSession(messageId, interaction.user.id, interaction.channelId);
 
   if (customId === 'dashboard:main') {
     await interaction.update(mainPanel(guildId));
@@ -1477,7 +1531,25 @@ async function handleDashboardButton(interaction) {
 
   switch (customId) {
     case 'dashboard:general':
-      await interaction.update(generalPanel(guildId));
+    case 'dashboard:channels':
+      await interaction.update(channelsPanel(guildId));
+      return;
+    case 'dashboard:general:more':
+    case 'dashboard:roles':
+      await interaction.update(rolesPanel(guildId));
+      return;
+    case 'dashboard:security':
+    case 'dashboard:antiraid':
+    case 'dashboard:antinuke':
+      await interaction.update(securityPanel(guildId));
+      return;
+    case 'dashboard:engagement':
+    case 'dashboard:levels':
+    case 'dashboard:starboard':
+      await interaction.update(engagementPanel(guildId));
+      return;
+    case 'dashboard:settings':
+      await interaction.update(settingsPanel(guildId));
       return;
     case 'dashboard:hierarchy': {
       const payload = hierarchyPanel(guildId);
@@ -1494,35 +1566,14 @@ async function handleDashboardButton(interaction) {
     case 'dashboard:moderation':
       await interaction.update(moderationPanel(guildId));
       return;
-    case 'dashboard:antiraid':
-      await interaction.update(antiraidPanel(guildId));
-      return;
-    case 'dashboard:antinuke':
-      await interaction.update(antinukePanel(guildId));
-      return;
-    case 'dashboard:levels':
-      await interaction.update(levelsPanel(guildId));
-      return;
-    case 'dashboard:starboard':
-      await interaction.update(starboardPanel(guildId));
-      return;
     case 'dashboard:counters':
       await interaction.update(countersPanel(guildId));
       return;
     case 'dashboard:general:prefix':
       await showPrefixModal(interaction);
       return;
-    case 'dashboard:general:support_channel':
-      await showSettingModal(interaction, 'SUPPORT_PANEL_CHANNEL_ID', 'Support Panel Channel', gs(guildId, 'SUPPORT_PANEL_CHANNEL_ID'));
-      return;
-    case 'dashboard:general:transcript_channel':
-      await showSettingModal(interaction, 'TRANSCRIPT_CHANNEL_ID', 'Transcript Channel', gs(guildId, 'TRANSCRIPT_CHANNEL_ID'));
-      return;
     case 'dashboard:general:documents':
       await showSettingModal(interaction, 'DOCUMENTS_CHANNEL_ID', 'Documents Evidence Channel', gs(guildId, 'DOCUMENTS_CHANNEL_ID'));
-      return;
-    case 'dashboard:general:more':
-      await interaction.update(generalMorePanel(guildId));
       return;
     case 'dashboard:general:edit_break_chan':
       await showSettingModal(interaction, 'BREAK_REQUEST_CHANNEL_ID', 'Break Request Channel', gs(guildId, 'BREAK_REQUEST_CHANNEL_ID'));
@@ -1545,23 +1596,8 @@ async function handleDashboardButton(interaction) {
     case 'dashboard:general:edit_modlog':
       await showSettingModal(interaction, 'modlog_channel', 'Modlog Channel', stateManager.getModlogChannel(guildId));
       return;
-    case 'dashboard:general:edit_pplan':
-      await showSettingModal(interaction, 'PP_CHANNEL_ID', 'Performance Plan Channel', gs(guildId, 'PP_CHANNEL_ID'));
-      return;
     case 'dashboard:general:edit_demote':
       await showSettingModal(interaction, 'DEMOTE_EXEMPT_ROLES', 'Demote Exempt Role IDs (comma-sep)', gs(guildId, 'DEMOTE_EXEMPT_ROLES', ''));
-      return;
-    case 'dashboard:general:apps':
-      await interaction.update(applicationsPanel(guildId));
-      return;
-    case 'dashboard:general:apps_review':
-      await showSettingModal(interaction, 'APPS_REVIEW_CHANNEL_ID', 'Review Channel', gs(guildId, 'APPS_REVIEW_CHANNEL_ID'));
-      return;
-    case 'dashboard:general:apps_role':
-      await showSettingModal(interaction, 'APPS_APPROVED_ROLE_ID', 'Approved Role', gs(guildId, 'APPS_APPROVED_ROLE_ID'));
-      return;
-    case 'dashboard:general:apps_ghost':
-      await showSettingModal(interaction, 'APPS_GHOST_PING_CHANNEL_ID', 'Ghost Ping Channel', gs(guildId, 'APPS_GHOST_PING_CHANNEL_ID'));
       return;
     case 'dashboard:general:appearance':
       await interaction.update(appearancePanel(guildId));
@@ -1575,16 +1611,15 @@ async function handleDashboardButton(interaction) {
     case 'dashboard:general:success_response':
       await showSettingModal(interaction, 'success_response', 'Success Emoji/Text', gs(guildId, 'success_response', '👍'));
       return;
-    case 'dashboard:general:support_dm':
-      await interaction.deferReply({ ephemeral: true });
-      const { ensureSupportPanel } = await import('../tickets/ticket.js');
-      const chanId = gs(guildId, 'SUPPORT_PANEL_CHANNEL_ID') || config.supportPanel.channelId;
-      if (!chanId) {
-        await interaction.editReply('no support channel configured. set one first.');
-        return;
-      }
-      await ensureSupportPanel();
-      await interaction.editReply('support panel sent to <#' + chanId + '>.');
+
+    case 'dashboard:channels:set_automod':
+      await showSettingModal(interaction, 'ANTI_BOT_AUTOMOD_CHANNEL_ID', 'Automod Channel', gs(guildId, 'ANTI_BOT_AUTOMOD_CHANNEL_ID'));
+      return;
+    case 'dashboard:channels:set_jail_channel':
+      await showSettingModal(interaction, 'jail_channel_id', 'Jail Channel', gs(guildId, 'jail_channel_id'));
+      return;
+    case 'dashboard:roles:set_jail_role':
+      await showSettingModal(interaction, 'jail_role_id', 'Jail Role', gs(guildId, 'jail_role_id'));
       return;
     case 'dashboard:autoroles':
       await interaction.update(autorolesPanel(guildId));
@@ -1729,38 +1764,14 @@ async function handleDashboardButton(interaction) {
     case 'dashboard:policies:commands':
       await interaction.update(policyCommandsPanel(guildId));
       return;
-    case 'dashboard:policies:branches':
-      await interaction.update(policyBranchesPanel(guildId));
-      return;
     case 'dashboard:policies:rolepolicy':
       await interaction.update(policyRolePanel(guildId));
       return;
     case 'dashboard:policies:rolepolicy:edit':
       await showPolicyEditModal(interaction, 'rolepolicy');
       return;
-    case 'dashboard:policies:snippets':
-      await interaction.update(policySnippetsPanel(guildId));
-      return;
-    case 'dashboard:policies:modmail':
-      await interaction.update(policyModmailPanel(guildId));
-      return;
-    case 'dashboard:policies:modmail:edit':
-      await showPolicyEditModal(interaction, 'modmail');
-      return;
-    case 'dashboard:policies:aliases':
-      await interaction.update(policyAliasesPanel(guildId));
-      return;
-    case 'dashboard:policies:aliases:edit':
-      await showPolicyEditModal(interaction, 'aliases');
-      return;
     case 'dashboard:policies:commands:edit':
       await showPolicyEditModal(interaction, 'commands');
-      return;
-    case 'dashboard:policies:branches:edit':
-      await showPolicyEditModal(interaction, 'branches');
-      return;
-    case 'dashboard:policies:snippets:edit':
-      await showPolicyEditModal(interaction, 'snippets');
       return;
     case 'dashboard:hierarchy:select': {
       const wingId = interaction.values?.[0];
@@ -1926,7 +1937,7 @@ async function handleDashboardButton(interaction) {
 async function handleDashboardModal(interaction) {
   const { customId, guildId, member } = interaction;
   if (await expireSession(interaction)) return;
-  touchSession(interaction.message?.id);
+  touchSession(interaction.message?.id, interaction.user.id, interaction.channelId);
   if (!canManage(member)) {
     await interaction.reply({ content: 'nuuu', ephemeral: true });
     return;
@@ -1942,7 +1953,7 @@ async function handleDashboardModal(interaction) {
         return;
       }
       setPrefix(guildId, value);
-      await interaction.update(generalPanel(guildId));
+      await interaction.update(settingsPanel(guildId));
       break;
     }
 case 'dashboard:fakeperms:grant_role':
@@ -2047,26 +2058,6 @@ case 'dashboard:fakeperms:grant_role':
       }
       break;
     }
-    case 'dashboard_modal:policy:branches': {
-      try {
-        const json = JSON.parse(fields.getTextInputValue('policy_json'));
-        stateManager.setGuildSetting(guildId, '_policy_branches', JSON.stringify(json));
-        await interaction.update(policyBranchesPanel(guildId));
-      } catch (e) {
-        await interaction.reply({ content: 'Invalid JSON: ' + e.message, ephemeral: true });
-      }
-      break;
-    }
-    case 'dashboard_modal:policy:snippets': {
-      try {
-        const json = JSON.parse(fields.getTextInputValue('policy_json'));
-        stateManager.setGuildSetting(guildId, '_policy_snippets', JSON.stringify(json));
-        await interaction.update(policySnippetsPanel(guildId));
-      } catch (e) {
-        await interaction.reply({ content: 'Invalid JSON: ' + e.message, ephemeral: true });
-      }
-      break;
-    }
     case 'dashboard_modal:setting:PERM_GRANT': {
       const permVal = fields.getTextInputValue('setting_value').trim();
       const [roleId, node, mode] = permVal.split(',').map((s) => s.trim());
@@ -2100,51 +2091,11 @@ case 'dashboard:fakeperms:grant_role':
       await interaction.update(confirmEmbed(guildId, 'Auto-role added', 'dashboard:autoroles'));
       break;
     }
-    case 'dashboard_modal:policy:aliases': {
-      try {
-        const json = JSON.parse(fields.getTextInputValue('policy_json'));
-        stateManager.setGuildSetting(guildId, '_command_aliases', JSON.stringify(json));
-        await interaction.update(confirmEmbed(guildId, 'Command aliases saved', 'dashboard:policies:aliases'));
-      } catch (e) {
-        await interaction.reply({ content: 'Invalid JSON: ' + e.message, ephemeral: true });
-      }
-      break;
-    }
     case 'dashboard_modal:policy:commands': {
       try {
         const json = JSON.parse(fields.getTextInputValue('policy_json'));
         stateManager.setGuildSetting(guildId, '_policy_commands', JSON.stringify(json));
         await interaction.update(confirmEmbed(guildId, 'Command permissions saved', 'dashboard:policies:commands'));
-      } catch (e) {
-        await interaction.reply({ content: 'Invalid JSON: ' + e.message, ephemeral: true });
-      }
-      break;
-    }
-    case 'dashboard_modal:policy:branches': {
-      try {
-        const json = JSON.parse(fields.getTextInputValue('policy_json'));
-        stateManager.setGuildSetting(guildId, '_policy_branches', JSON.stringify(json));
-        await interaction.update(confirmEmbed(guildId, 'Branch policy saved', 'dashboard:policies:branches'));
-      } catch (e) {
-        await interaction.reply({ content: 'Invalid JSON: ' + e.message, ephemeral: true });
-      }
-      break;
-    }
-    case 'dashboard_modal:policy:snippets': {
-      try {
-        const json = JSON.parse(fields.getTextInputValue('policy_json'));
-        stateManager.setGuildSetting(guildId, '_policy_snippets', JSON.stringify(json));
-        await interaction.update(confirmEmbed(guildId, 'Snippets saved', 'dashboard:policies:snippets'));
-      } catch (e) {
-        await interaction.reply({ content: 'Invalid JSON: ' + e.message, ephemeral: true });
-      }
-      break;
-    }
-    case 'dashboard_modal:policy:modmail': {
-      try {
-        const json = JSON.parse(fields.getTextInputValue('policy_json'));
-        stateManager.setGuildSetting(guildId, '_modmail_policy', JSON.stringify(json));
-        await interaction.update(confirmEmbed(guildId, 'Modmail policy saved', 'dashboard:policies:modmail'));
       } catch (e) {
         await interaction.reply({ content: 'Invalid JSON: ' + e.message, ephemeral: true });
       }
@@ -2162,19 +2113,13 @@ case 'dashboard:fakeperms:grant_role':
       }
       break;
     }
-    case 'dashboard_modal:setting:SUPPORT_PANEL_CHANNEL_ID':
-    case 'dashboard_modal:setting:TRANSCRIPT_CHANNEL_ID':
     case 'dashboard_modal:setting:BREAK_REQUEST_CHANNEL_ID':
     case 'dashboard_modal:setting:ON_BREAK_ROLE_ID':
     case 'dashboard_modal:setting:PBAN_PROPOSAL_CHANNEL_ID':
     case 'dashboard_modal:setting:PBAN_LOG_CHANNEL_ID':
     case 'dashboard_modal:setting:DOCUMENTS_CHANNEL_ID':
     case 'dashboard_modal:setting:modlog_channel':
-    case 'dashboard_modal:setting:PP_CHANNEL_ID':
     case 'dashboard_modal:setting:DEMOTE_EXEMPT_ROLES':
-    case 'dashboard_modal:setting:APPS_REVIEW_CHANNEL_ID':
-    case 'dashboard_modal:setting:APPS_APPROVED_ROLE_ID':
-    case 'dashboard_modal:setting:APPS_GHOST_PING_CHANNEL_ID':
     case 'dashboard_modal:setting:PBAN_PROTECTED_ROLE_IDS':
     case 'dashboard_modal:setting:PBAN_APPEALS_INVITE':
     case 'dashboard_modal:setting:success_response':
@@ -2185,7 +2130,7 @@ case 'dashboard:fakeperms:grant_role':
       stateManager.setGuildSetting(guildId, settingKey, value || null);
       if (settingKey === 'modlog_channel') stateManager.setModlogChannel(guildId, value || null);
       if (settingKey === 'DOCUMENTS_CHANNEL_ID') stateManager.setDocumentsChannel(guildId, value || null);
-      await interaction.update(confirmEmbed(guildId, '`' + settingKey + '` saved', 'dashboard:general:more'));
+      await interaction.update(confirmEmbed(guildId, '`' + settingKey + '` saved', 'dashboard:main'));
       break;
     }
     case 'dashboard_modal:hierarchy:add': {

@@ -1,6 +1,7 @@
 import { EmbedBuilder } from 'discord.js';
 import config from '../../core/config.js';
-import { memberHasPermission, memberHasAnyCachedRole, staffListRoleIdsForGroup, staffListPartsForRoleIds, staffListRankLabel, staffListSortValue } from '../../core/permissions.js';
+import stateManager from '../../core/state.js';
+import { memberHasPermission, memberHasAnyCachedRole, staffListRoleIdsForGroup, staffListPartsForRoleIds, staffListRankLabel, staffListSortValue, staffRoleHierarchyIds } from '../../core/permissions.js';
 import { memberDisplayName, sortStaffListEntries, chunkStaffListValue, userIdsOnBreakForDepartment } from './shared.js';
 
 const STAFF_LIST_DEPARTMENTS = [
@@ -61,9 +62,17 @@ async function buildStaffListEmbed(guild, guildId) {
     });
   }
 
-  const allBreakUserIds = Object.entries(brState.activeByUserId || {})
+  const onBreakRoleId = await stateManager.getGuildSetting(guildId, 'ON_BREAK_ROLE_ID') || config.breaks?.onBreakRoleId || null;
+
+  const brBreakUserIds = Object.entries(brState.activeByUserId || {})
     .filter(([, activeBreak]) => activeBreak.guildId === guildId)
     .map(([userId]) => userId);
+
+  const roleBreakUserIds = onBreakRoleId
+    ? members.filter((m) => !m.user.bot && m.roles.cache.has(onBreakRoleId)).map((m) => m.id)
+    : [];
+
+  const allBreakUserIds = [...new Set([...brBreakUserIds, ...roleBreakUserIds])];
 
   if (allBreakUserIds.length) {
     const breakLines = allBreakUserIds
@@ -103,7 +112,8 @@ async function handleSlashCommand(interaction) {
   if (!member || !member.roles) {
     try { member = await interaction.guild.members.fetch(interaction.user.id); } catch {}
   }
-  if (!member || !memberHasPermission(member, 'staff.stafflist')) {
+  const staffRoleIds = staffRoleHierarchyIds();
+  if (!staffRoleIds.length || !memberHasAnyCachedRole(member, staffRoleIds)) {
     await interaction.reply({ content: 'Command failed.', ephemeral: true });
     return;
   }
@@ -126,7 +136,8 @@ async function handlePrefixCommand(message, args, guildId) {
   if (!member || !member.roles) {
     try { member = await message.guild.members.fetch(message.author.id); } catch {}
   }
-  if (!member || !memberHasPermission(member, 'staff.stafflist')) {
+  const staffRoleIds = staffRoleHierarchyIds();
+  if (!staffRoleIds.length || !memberHasAnyCachedRole(member, staffRoleIds)) {
     await message.reply('Command failed.');
     return;
   }

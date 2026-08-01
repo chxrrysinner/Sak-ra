@@ -34,7 +34,7 @@ async function removeStrike(targetUser) {
 async function handleSlashCommand(interaction) {
   const allowed = interaction.member && memberHasPermission(interaction.member, 'staff.removeStrike');
   if (!allowed) {
-    await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+    await interaction.reply({ content: '\u200b', ephemeral: true }).catch(() => {});
     return;
   }
 
@@ -46,10 +46,7 @@ async function handleSlashCommand(interaction) {
 }
 
 async function handlePrefixCommand(message, args, guildId) {
-  if (!message.member || !memberHasPermission(message.member, 'staff.removeStrike')) {
-    await message.reply('You do not have permission to use this command.');
-    return;
-  }
+  if (!message.member || !memberHasPermission(message.member, 'staff.removeStrike')) return;
 
   if (!args.length) {
     await message.reply('Usage: `?removestrike <@user>`');

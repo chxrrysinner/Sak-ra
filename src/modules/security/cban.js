@@ -5,7 +5,7 @@ import { validDiscordUserId, ensureBanProfileForUser, banProfileEmbed, sendBanPr
 export default async function handleCbanCommand(interaction) {
   const allowed = interaction.member && memberHasPermission(interaction.member, 'security.cban');
   if (!allowed) {
-    await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+    await interaction.reply({ content: '\u200b', ephemeral: true }).catch(() => {});
     return;
   }
 

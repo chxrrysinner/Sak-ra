@@ -5,14 +5,13 @@ import { Strategy as DiscordStrategy } from 'passport-discord';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import logger from '../../../core/logger.js';
+import config from '../../../core/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicPath = path.join(__dirname, '..', 'public');
 
-function requireLoginApi(req, res, next) {
-  if (req.isAuthenticated && req.isAuthenticated()) return next();
-  res.status(401).json({ error: 'Not authenticated' });
-}
+const guildAccessCache = new Map();
+const GUILD_ACCESS_TTL = 5 * 60 * 1000;
 
 function getChannelTypeName(type) {
   const types = {
@@ -23,10 +22,63 @@ function getChannelTypeName(type) {
   return types[type] || 'Unknown';
 }
 
+function requireAuth(req, res, next) {
+  if (req.isAuthenticated && req.isAuthenticated()) return next();
+  res.status(401).json({ error: 'Not authenticated' });
+}
+
+function requireGuildAccess(core) {
+  return async (req, res, next) => {
+    if (!req.isAuthenticated || !req.isAuthenticated()) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const guildId = req.params.guildId;
+    if (!guildId) return res.status(400).json({ error: 'Missing guildId' });
+
+    const userId = req.user.id;
+    const cacheKey = `${userId}:${guildId}`;
+    const cached = guildAccessCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+      if (cached.allowed) return next();
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    try {
+      const guild = await core.client.guilds.fetch(guildId);
+      let member;
+      try {
+        member = await guild.members.fetch(userId);
+      } catch {
+        guildAccessCache.set(cacheKey, { allowed: false, expiresAt: Date.now() + GUILD_ACCESS_TTL });
+        return res.status(403).json({ error: 'Not a member of this guild' });
+      }
+
+      const isOwner = config.ownerId && member.id === config.ownerId;
+      const hasPerms = member.permissions?.has('Administrator') || member.permissions?.has('ManageGuild');
+
+      if (isOwner || hasPerms) {
+        guildAccessCache.set(cacheKey, { allowed: true, expiresAt: Date.now() + GUILD_ACCESS_TTL });
+        return next();
+      }
+
+      guildAccessCache.set(cacheKey, { allowed: false, expiresAt: Date.now() + GUILD_ACCESS_TTL });
+      res.status(403).json({ error: 'Access denied' });
+    } catch (error) {
+      logger.error({ guildId, userId, error: error.message }, 'Guild access check failed');
+      res.status(500).json({ error: 'Failed to verify guild access' });
+    }
+  };
+}
+
 export default async function startDashboardServer(core) {
   const app = express();
   const port = process.env.DASHBOARD_PORT || 3000;
-  const prefixModule = await import('../../core/prefix.js');
+  const prefixModule = await import('../../../core/prefix.js');
+
+  if (!process.env.DASHBOARD_SESSION_SECRET) {
+    logger.warn('DASHBOARD_SESSION_SECRET not set — using insecure default. Set a strong secret in .env');
+  }
 
   app.use(session({
     secret: process.env.DASHBOARD_SESSION_SECRET || 'hallows-dashboard-secret',
@@ -61,8 +113,7 @@ export default async function startDashboardServer(core) {
   app.get('/logout', (req, res) => { req.logout(() => {}); res.redirect('/'); });
 
   // ── API: User ──
-  app.get('/api/user', (req, res) => {
-    if (!req.isAuthenticated || !req.isAuthenticated()) return res.status(401).json({ error: 'Not authenticated' });
+  app.get('/api/user', requireAuth, (req, res) => {
     const user = req.user;
     let guilds = user.guilds || [];
     if (process.env.GUILD_ID) {
@@ -75,38 +126,31 @@ export default async function startDashboardServer(core) {
     res.json({ id: user.id, username: user.username, discriminator: user.discriminator, avatar: user.avatar, guilds, guildId: process.env.GUILD_ID || null });
   });
 
-  app.get('/api/nodes', (req, res) => res.json(core.state.getAllPermissionNodes()));
+  app.get('/api/nodes', requireAuth, (req, res) => res.json(core.state.getAllPermissionNodes()));
 
   // ── API: Stats & Activity ──
-  app.get('/api/stats/:guildId', requireLoginApi, async (req, res) => {
+  app.get('/api/stats/:guildId', requireGuildAccess(core), async (req, res) => {
     try {
       const { guildId } = req.params;
-      const openTickets = core.state.queryOne('SELECT COUNT(*) as c FROM tickets WHERE status = ?', 'open');
-      const totalTickets = core.state.queryOne('SELECT COUNT(*) as c FROM tickets');
-      const closedTickets = core.state.queryOne("SELECT COUNT(*) as c FROM tickets WHERE status = 'closed'");
       res.json({
         nodeCount: core.state.getAllPermissionNodes().length,
         wingCount: core.state.getWings(guildId).length,
-        ticketCount: openTickets?.c || 0,
-        totalTicketCount: totalTickets?.c || 0,
-        closedTicketCount: closedTickets?.c || 0,
         moduleCount: Object.values(core.state.getAllModuleToggles(guildId)).filter(Boolean).length
       });
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.get('/api/recent-activity/:guildId', requireLoginApi, async (req, res) => {
+  app.get('/api/recent-activity/:guildId', requireGuildAccess(core), async (req, res) => {
     try {
       const { guildId } = req.params;
       const limit = parseInt(req.query.limit || 10);
       const logs = core.state.query("SELECT * FROM audit_log WHERE guild_id = ? ORDER BY timestamp DESC LIMIT ?", guildId, limit);
-      const tickets = core.state.query("SELECT * FROM tickets ORDER BY created_at DESC LIMIT ?", limit);
-      res.json({ logs, tickets });
+      res.json({ logs });
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
   // ── API: General Settings ──
-  app.get('/api/settings/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/settings/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       const { guildId } = req.params;
       const settings = core.state.getAllGuildSettings(guildId);
@@ -117,7 +161,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.put('/api/settings/:guildId', requireLoginApi, async (req, res) => {
+  app.put('/api/settings/:guildId', requireGuildAccess(core), async (req, res) => {
     try {
       const { guildId } = req.params;
       const { key, value } = req.body;
@@ -137,17 +181,17 @@ export default async function startDashboardServer(core) {
   });
 
   // ── API: Hierarchy / Wings ──
-  app.get('/api/wings/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/wings/:guildId', requireGuildAccess(core), (req, res) => {
     try { res.json(core.state.getWings(req.params.guildId)); }
     catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.get('/api/wings/:guildId/:wingId/roles', requireLoginApi, (req, res) => {
+  app.get('/api/wings/:guildId/:wingId/roles', requireGuildAccess(core), (req, res) => {
     try { res.json(core.state.getWingRoles(req.params.guildId, req.params.wingId)); }
     catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.post('/api/hierarchy/wings/:guildId', requireLoginApi, (req, res) => {
+  app.post('/api/hierarchy/wings/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       const { guildId } = req.params;
       const { id, label, channelPrefix, description, sortOrder } = req.body;
@@ -158,7 +202,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.put('/api/hierarchy/wings/:guildId/:wingId', requireLoginApi, (req, res) => {
+  app.put('/api/hierarchy/wings/:guildId/:wingId', requireGuildAccess(core), (req, res) => {
     try {
       core.state.updateWing(req.params.guildId, req.params.wingId, req.body);
       core.state.logAudit(req.params.guildId, req.user.id, 'wing_updated', 'wing', req.params.wingId, JSON.stringify(req.body));
@@ -166,7 +210,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.delete('/api/hierarchy/wings/:guildId/:wingId', requireLoginApi, (req, res) => {
+  app.delete('/api/hierarchy/wings/:guildId/:wingId', requireGuildAccess(core), (req, res) => {
     try {
       core.state.deleteWing(req.params.guildId, req.params.wingId);
       core.state.logAudit(req.params.guildId, req.user.id, 'wing_deleted', 'wing', req.params.wingId);
@@ -174,7 +218,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.post('/api/hierarchy/wings/:guildId/:wingId/roles', requireLoginApi, (req, res) => {
+  app.post('/api/hierarchy/wings/:guildId/:wingId/roles', requireGuildAccess(core), (req, res) => {
     try {
       const { guildId, wingId } = req.params;
       const { roleId, rank, label, isLead, isInternal, isCategory, sortOrder } = req.body;
@@ -185,7 +229,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.put('/api/hierarchy/wings/:guildId/:wingId/roles/:roleId', requireLoginApi, (req, res) => {
+  app.put('/api/hierarchy/wings/:guildId/:wingId/roles/:roleId', requireGuildAccess(core), (req, res) => {
     try {
       const { guildId, wingId, roleId } = req.params;
       const fields = req.body;
@@ -196,7 +240,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.delete('/api/hierarchy/wings/:guildId/:wingId/roles/:roleId', requireLoginApi, (req, res) => {
+  app.delete('/api/hierarchy/wings/:guildId/:wingId/roles/:roleId', requireGuildAccess(core), (req, res) => {
     try {
       core.state.removeWingRole(req.params.guildId, req.params.wingId, req.params.roleId);
       core.state.logAudit(req.params.guildId, req.user.id, 'wing_role_removed', 'role', req.params.roleId);
@@ -204,7 +248,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.put('/api/hierarchy/wings/:guildId/reorder', requireLoginApi, (req, res) => {
+  app.put('/api/hierarchy/wings/:guildId/reorder', requireGuildAccess(core), (req, res) => {
     try {
       const { wingIds } = req.body;
       if (!Array.isArray(wingIds)) return res.status(400).json({ error: 'wingIds must be an array' });
@@ -214,7 +258,7 @@ export default async function startDashboardServer(core) {
   });
 
   // ── API: Modules ──
-  app.get('/api/modules/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/modules/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       const toggles = core.state.getAllModuleToggles(req.params.guildId);
       const modules = core.registry.getAll().map(mod => ({
@@ -228,7 +272,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.put('/api/modules/:guildId/:moduleName', requireLoginApi, (req, res) => {
+  app.put('/api/modules/:guildId/:moduleName', requireGuildAccess(core), (req, res) => {
     try {
       const { enabled } = req.body;
       if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be a boolean' });
@@ -238,50 +282,13 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  // ── API: Tickets ──
-  app.get('/api/tickets/:guildId', requireLoginApi, (req, res) => {
-    try {
-      const tickets = core.state.query("SELECT * FROM tickets WHERE status = 'open' ORDER BY created_at DESC");
-      res.json(tickets.map(t => ({ id: t.id, userId: t.user_id, channelId: t.channel_id, departmentId: t.department_id, status: t.status, priority: t.priority, claimedBy: t.claimed_by, createdAt: t.created_at, channelName: t.channel_name })));
-    } catch (error) { res.status(500).json({ error: error.message }); }
-  });
-
-  app.get('/api/tickets/:guildId/:ticketId', requireLoginApi, (req, res) => {
-    try {
-      const ticket = core.state.queryOne("SELECT * FROM tickets WHERE id = ?", req.params.ticketId);
-      if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
-      const history = core.state.query("SELECT * FROM ticket_history WHERE ticket_id = ? ORDER BY timestamp ASC", req.params.ticketId);
-      res.json({ ticket, history });
-    } catch (error) { res.status(500).json({ error: error.message }); }
-  });
-
-  app.post('/api/tickets/:guildId/:ticketId/close', requireLoginApi, (req, res) => {
-    try {
-      const ticket = core.state.queryOne("SELECT * FROM tickets WHERE id = ?", req.params.ticketId);
-      if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
-      core.state.run("UPDATE tickets SET status = 'closed', closed_at = datetime('now') WHERE id = ?", req.params.ticketId);
-      core.state.logAudit(req.params.guildId, req.user.id, 'ticket_closed', 'ticket', req.params.ticketId, req.body.reason || 'Closed via dashboard');
-      res.json({ success: true });
-    } catch (error) { res.status(500).json({ error: error.message }); }
-  });
-
-  app.put('/api/tickets/:guildId/:ticketId/priority', requireLoginApi, (req, res) => {
-    try {
-      const { priority } = req.body;
-      if (!['low', 'normal', 'high', 'urgent'].includes(priority)) return res.status(400).json({ error: 'Invalid priority' });
-      core.state.run("UPDATE tickets SET priority = ? WHERE id = ?", priority, req.params.ticketId);
-      core.state.logAudit(req.params.guildId, req.user.id, 'ticket_priority', 'ticket', req.params.ticketId, priority);
-      res.json({ success: true });
-    } catch (error) { res.status(500).json({ error: error.message }); }
-  });
-
   // ── API: Permissions ──
-  app.get('/api/permissions/roles/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/permissions/roles/:guildId', requireGuildAccess(core), (req, res) => {
     try { res.json(core.state.getAllRolePermissions(req.params.guildId)); }
     catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.post('/api/permissions/roles/:guildId', requireLoginApi, (req, res) => {
+  app.post('/api/permissions/roles/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       const { roleId, node, mode } = req.body;
       if (!roleId || !node || !mode) return res.status(400).json({ error: 'Missing fields' });
@@ -292,13 +299,13 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.get('/api/permissions/audit/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/permissions/audit/:guildId', requireGuildAccess(core), (req, res) => {
     try { res.json(core.state.getAuditLog(req.params.guildId, parseInt(req.query.limit || 50))); }
     catch (error) { res.status(500).json({ error: error.message }); }
   });
 
   // ── API: Channels ──
-  app.get('/api/channels/:guildId', requireLoginApi, async (req, res) => {
+  app.get('/api/channels/:guildId', requireGuildAccess(core), async (req, res) => {
     try {
       const guild = await core.client.guilds.fetch(req.params.guildId);
       const channels = await guild.channels.fetch();
@@ -310,7 +317,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.get('/api/channels/:guildId/:channelId', requireLoginApi, async (req, res) => {
+  app.get('/api/channels/:guildId/:channelId', requireGuildAccess(core), async (req, res) => {
     try {
       const guild = await core.client.guilds.fetch(req.params.guildId);
       const ch = await guild.channels.fetch(req.params.channelId);
@@ -320,7 +327,7 @@ export default async function startDashboardServer(core) {
   });
 
   // ── API: Roles ──
-  app.get('/api/roles/:guildId', requireLoginApi, async (req, res) => {
+  app.get('/api/roles/:guildId', requireGuildAccess(core), async (req, res) => {
     try {
       const guild = await core.client.guilds.fetch(req.params.guildId);
       const roles = await guild.roles.fetch();
@@ -328,7 +335,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.get('/api/roles/:guildId/enhanced', requireLoginApi, async (req, res) => {
+  app.get('/api/roles/:guildId/enhanced', requireGuildAccess(core), async (req, res) => {
     try {
       const guild = await core.client.guilds.fetch(req.params.guildId);
       const roles = await guild.roles.fetch();
@@ -336,7 +343,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.get('/api/roles/:guildId/:roleId/members', requireLoginApi, async (req, res) => {
+  app.get('/api/roles/:guildId/:roleId/members', requireGuildAccess(core), async (req, res) => {
     try {
       const guild = await core.client.guilds.fetch(req.params.guildId);
       const role = await guild.roles.fetch(req.params.roleId);
@@ -347,7 +354,7 @@ export default async function startDashboardServer(core) {
   });
 
   // ── API: Logs ──
-  app.get('/api/logs/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/logs/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       const { guildId } = req.params;
       const { limit = 100, offset = 0, action, actor } = req.query;
@@ -362,7 +369,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.get('/api/logs/:guildId/actions', requireLoginApi, (req, res) => {
+  app.get('/api/logs/:guildId/actions', requireGuildAccess(core), (req, res) => {
     try {
       const actions = core.state.query("SELECT DISTINCT action FROM audit_log WHERE guild_id = ? ORDER BY action", req.params.guildId);
       res.json(actions.map(a => a.action));
@@ -370,7 +377,7 @@ export default async function startDashboardServer(core) {
   });
 
   // ── API: Moderation ──
-  app.get('/api/moderation/stats/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/moderation/stats/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       const s = core.state.queryOne("SELECT COUNT(*) as total, COUNT(CASE WHEN action='ban' THEN 1 END) as bans, COUNT(CASE WHEN action='kick' THEN 1 END) as kicks, COUNT(CASE WHEN action='warn' THEN 1 END) as warns, COUNT(CASE WHEN action='mute' THEN 1 END) as mutes, COUNT(CASE WHEN action='timeout' THEN 1 END) as timeouts, COUNT(CASE WHEN action='unban' THEN 1 END) as unbans, COUNT(CASE WHEN action='unmute' THEN 1 END) as unmutes FROM mod_cases WHERE guild_id = ?", req.params.guildId);
       const activeBans = core.state.queryOne("SELECT COUNT(DISTINCT user_id) as count FROM mod_cases WHERE guild_id = ? AND action = 'ban' AND user_id NOT IN (SELECT user_id FROM mod_cases WHERE guild_id = ? AND action = 'unban')", req.params.guildId, req.params.guildId);
@@ -378,7 +385,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.get('/api/moderation/cases/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/moderation/cases/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       const { guildId } = req.params;
       const { limit = 50, offset = 0, action, userId, moderatorId } = req.query;
@@ -394,7 +401,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.get('/api/moderation/cases/:guildId/:caseId', requireLoginApi, (req, res) => {
+  app.get('/api/moderation/cases/:guildId/:caseId', requireGuildAccess(core), (req, res) => {
     try {
       const caseData = core.state.queryOne("SELECT * FROM mod_cases WHERE guild_id = ? AND id = ?", req.params.guildId, req.params.caseId);
       if (!caseData) return res.status(404).json({ error: 'Case not found' });
@@ -403,7 +410,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.post('/api/moderation/cases/:guildId/:caseId', requireLoginApi, (req, res) => {
+  app.post('/api/moderation/cases/:guildId/:caseId', requireGuildAccess(core), (req, res) => {
     try {
       const { reason } = req.body;
       core.state.run("UPDATE mod_cases SET reason = ? WHERE id = ? AND guild_id = ?", reason, req.params.caseId, req.params.guildId);
@@ -412,7 +419,7 @@ export default async function startDashboardServer(core) {
   });
 
   // ── API: Moderation Config ──
-  app.get('/api/moderation/config/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/moderation/config/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       const { guildId } = req.params;
       res.json({
@@ -425,7 +432,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.put('/api/moderation/config/:guildId', requireLoginApi, (req, res) => {
+  app.put('/api/moderation/config/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       const { guildId } = req.params;
       const { key, value } = req.body;
@@ -437,7 +444,7 @@ export default async function startDashboardServer(core) {
   });
 
   // ── API: Leveling ──
-  app.get('/api/leveling/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/leveling/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       const config = core.state.getLevelConfig(req.params.guildId);
       const rewards = core.state.getLevelRewards(req.params.guildId);
@@ -445,14 +452,14 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.put('/api/leveling/:guildId/config', requireLoginApi, (req, res) => {
+  app.put('/api/leveling/:guildId/config', requireGuildAccess(core), (req, res) => {
     try {
       core.state.setLevelConfig(req.params.guildId, req.body);
       res.json({ success: true });
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.post('/api/leveling/:guildId/rewards', requireLoginApi, (req, res) => {
+  app.post('/api/leveling/:guildId/rewards', requireGuildAccess(core), (req, res) => {
     try {
       const { level, roleId } = req.body;
       core.state.setLevelReward(req.params.guildId, level, roleId);
@@ -460,14 +467,14 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.delete('/api/leveling/:guildId/rewards/:level', requireLoginApi, (req, res) => {
+  app.delete('/api/leveling/:guildId/rewards/:level', requireGuildAccess(core), (req, res) => {
     try {
       core.state.removeLevelReward(req.params.guildId, parseInt(req.params.level));
       res.json({ success: true });
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.get('/api/leveling/:guildId/leaderboard', requireLoginApi, (req, res) => {
+  app.get('/api/leveling/:guildId/leaderboard', requireGuildAccess(core), (req, res) => {
     try {
       const lb = core.state.getLeaderboard(req.params.guildId, parseInt(req.query.limit || 10));
       res.json(lb);
@@ -475,12 +482,12 @@ export default async function startDashboardServer(core) {
   });
 
   // ── API: Starboard ──
-  app.get('/api/starboard/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/starboard/:guildId', requireGuildAccess(core), (req, res) => {
     try { res.json(core.state.getStarboardConfig(req.params.guildId)); }
     catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.put('/api/starboard/:guildId', requireLoginApi, (req, res) => {
+  app.put('/api/starboard/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       core.state.setStarboardConfig(req.params.guildId, req.body);
       res.json({ success: true });
@@ -488,12 +495,12 @@ export default async function startDashboardServer(core) {
   });
 
   // ── API: Anti-Raid ──
-  app.get('/api/antiraid/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/antiraid/:guildId', requireGuildAccess(core), (req, res) => {
     try { res.json(core.state.getRaidConfig(req.params.guildId)); }
     catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.put('/api/antiraid/:guildId', requireLoginApi, (req, res) => {
+  app.put('/api/antiraid/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       core.state.setRaidConfig(req.params.guildId, req.body);
       res.json({ success: true });
@@ -501,12 +508,12 @@ export default async function startDashboardServer(core) {
   });
 
   // ── API: Anti-Nuke ──
-  app.get('/api/antinuke/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/antinuke/:guildId', requireGuildAccess(core), (req, res) => {
     try { res.json(core.state.getAntinukeConfig(req.params.guildId)); }
     catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.put('/api/antinuke/:guildId', requireLoginApi, (req, res) => {
+  app.put('/api/antinuke/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       core.state.setAntinukeConfig(req.params.guildId, req.body);
       res.json({ success: true });
@@ -514,12 +521,12 @@ export default async function startDashboardServer(core) {
   });
 
   // ── API: Counters ──
-  app.get('/api/counters/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/counters/:guildId', requireGuildAccess(core), (req, res) => {
     try { res.json(core.state.getCounters(req.params.guildId)); }
     catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.post('/api/counters/:guildId', requireLoginApi, (req, res) => {
+  app.post('/api/counters/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       const { channelId, counterType, name, format } = req.body;
       core.state.createCounter(req.params.guildId, channelId, counterType, name, format);
@@ -527,7 +534,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.delete('/api/counters/:guildId/:channelId', requireLoginApi, (req, res) => {
+  app.delete('/api/counters/:guildId/:channelId', requireGuildAccess(core), (req, res) => {
     try {
       core.state.deleteCounter(req.params.guildId, req.params.channelId);
       res.json({ success: true });
@@ -535,19 +542,19 @@ export default async function startDashboardServer(core) {
   });
 
   // ── API: Auto-roles ──
-  app.get('/api/autoroles/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/autoroles/:guildId', requireGuildAccess(core), (req, res) => {
     try { res.json(core.state.getAutoroles(req.params.guildId)); }
     catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.post('/api/autoroles/:guildId', requireLoginApi, (req, res) => {
+  app.post('/api/autoroles/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       core.state.addAutorole(req.params.guildId, req.body.roleId);
       res.json({ success: true });
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.delete('/api/autoroles/:guildId/:roleId', requireLoginApi, (req, res) => {
+  app.delete('/api/autoroles/:guildId/:roleId', requireGuildAccess(core), (req, res) => {
     try {
       core.state.removeAutorole(req.params.guildId, req.params.roleId);
       res.json({ success: true });
@@ -555,7 +562,7 @@ export default async function startDashboardServer(core) {
   });
 
   // ── API: Fake Permissions ──
-  app.get('/api/fake-perms/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/fake-perms/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       const all = core.state.getAllFakePermissions(req.params.guildId);
       const grouped = {};
@@ -567,7 +574,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.post('/api/fake-perms/:guildId', requireLoginApi, (req, res) => {
+  app.post('/api/fake-perms/:guildId', requireGuildAccess(core), (req, res) => {
     try {
       const { flag, roleId } = req.body;
       if (!flag || !roleId) return res.status(400).json({ error: 'flag and roleId required' });
@@ -576,7 +583,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.delete('/api/fake-perms/:guildId/:flag/:roleId', requireLoginApi, (req, res) => {
+  app.delete('/api/fake-perms/:guildId/:flag/:roleId', requireGuildAccess(core), (req, res) => {
     try {
       core.state.revokeFakePermission(req.params.guildId, req.params.flag, req.params.roleId);
       res.json({ success: true });
@@ -584,12 +591,12 @@ export default async function startDashboardServer(core) {
   });
 
   // ── API: PBAN Vote Weights ──
-  app.get('/api/pban/weights/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/pban/weights/:guildId', requireGuildAccess(core), (req, res) => {
     try { res.json(core.state.getPbanVoteWeights(req.params.guildId)); }
     catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.put('/api/pban/weights/:guildId/:roleId', requireLoginApi, (req, res) => {
+  app.put('/api/pban/weights/:guildId/:roleId', requireGuildAccess(core), (req, res) => {
     try {
       const { weight, label } = req.body;
       core.state.setPbanVoteWeight(req.params.guildId, req.params.roleId, weight, label);
@@ -597,7 +604,7 @@ export default async function startDashboardServer(core) {
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
-  app.delete('/api/pban/weights/:guildId/:roleId', requireLoginApi, (req, res) => {
+  app.delete('/api/pban/weights/:guildId/:roleId', requireGuildAccess(core), (req, res) => {
     try {
       core.state.removePbanVoteWeight(req.params.guildId, req.params.roleId);
       res.json({ success: true });
@@ -605,7 +612,7 @@ export default async function startDashboardServer(core) {
   });
 
   // ── API: Giveaways (read-only for dashboard) ──
-  app.get('/api/giveaways/:guildId', requireLoginApi, (req, res) => {
+  app.get('/api/giveaways/:guildId', requireGuildAccess(core), (req, res) => {
     try { res.json(core.state.getActiveGiveaways(req.params.guildId)); }
     catch (error) { res.status(500).json({ error: error.message }); }
   });

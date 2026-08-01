@@ -71,10 +71,7 @@ async function handleStatsCommand(context, args) {
   let isSelf = true;
   if (args && args.trim()) {
     const canViewOthers = memberHasPermission(member, 'staff.strikesOthers');
-    if (!canViewOthers) {
-      await context.reply({ content: 'You do not have permission to view other staff members\' stats.', ephemeral: true });
-      return;
-    }
+    if (!canViewOthers) return;
     targetMember = await resolveTarget(context, args.trim());
     if (!targetMember) {
       await context.reply({ content: 'Could not find that user.', ephemeral: true });
@@ -100,7 +97,6 @@ async function handleStatsCommand(context, args) {
         name: 'Last 7 Days',
         value: [
           '📝 Messages: **' + formatNumber(week.messages) + '**',
-          '🎫 Ticket Replies: **' + formatNumber(week.replies) + '**',
           '🔨 Mod Actions: **' + formatNumber(week.modActions) + '**',
           '',
           '`' + sparkline + '`'
@@ -111,7 +107,6 @@ async function handleStatsCommand(context, args) {
         name: 'All Time',
         value: [
           '📝 Messages: **' + formatNumber(allTime.messages) + '**',
-          '🎫 Ticket Replies: **' + formatNumber(allTime.replies) + '**',
           '🔨 Mod Actions: **' + formatNumber(allTime.modActions) + '**'
         ].join('\n'),
         inline: false

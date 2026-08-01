@@ -93,7 +93,7 @@ async function handleSetupCommand(context, guildId, channel) {
   const reply = context.reply ? context.reply.bind(context) : (content) => context.editReply(content);
 
   if (stateManager.getGuildSetting(guildId, COMPLETE_KEY) === 'true') {
-    await reply({ content: 'Setup is already complete. Use `' + getPrefix(guildId) + 'dashboard` to modify settings.' }).catch(() => {});
+    await reply({ content: 'edit with dashboard!' }).catch(() => {});
     return;
   }
 
@@ -113,13 +113,6 @@ async function handleSetupCommand(context, guildId, channel) {
 }
 
 async function handlePrefixCommand(message, args, guildId) {
-  const trimmed = (typeof args === 'string' ? args : '').trim().toLowerCase();
-  if (trimmed === 'reset') {
-    stateManager.setGuildSetting(guildId, WIZARD_KEY, null);
-    stateManager.setGuildSetting(guildId, COMPLETE_KEY, null);
-    await message.reply('Setup data cleared. Run `' + getPrefix(guildId) + 'setup` to start fresh.').catch(() => {});
-    return;
-  }
   await handleSetupCommand(message, guildId, message.channel);
 }
 
@@ -142,84 +135,8 @@ async function processSelect(guildId, customId, values, guild) {
     return renderStep(guildId, 8, guild);
   }
 
-  if (key.startsWith('cmdpolicy:wing')) {
-    const wingId = values[0];
-    const wings = stateManager.getWings(guildId);
-    const wing = wings.find((w) => w.id === wingId);
-    if (!wing) return renderStep(guildId, Number(stateManager.getGuildSetting(guildId, WIZARD_KEY, 0)), guild);
-
-    const roles = stateManager.getWingRoles(guildId, wingId);
-    const embed = new EmbedBuilder()
-      .setColor(HALLOWS_ORANGE)
-      .setTitle('Command Policy: ' + (wing.label || wingId))
-      .setDescription([
-        'These commands control what this wing can do in tickets.',
-        '',
-        '**Reply** — Can reply to tickets in this wing',
-        '**Close** — Can close tickets in this wing',
-        '**Claim** — Can claim tickets in this wing',
-        '**Transfer** — Can transfer tickets out',
-        '**Escalate** — Can escalate to Internals',
-        '',
-        'By default, a wing can reply and close its own tickets.',
-        'Select a permission below to change it.'
-      ].join('\n'))
-      .setTimestamp();
-
-    const perms = ['reply', 'close', 'claim', 'transfer', 'escalate'];
-    const selectRow = new ActionRowBuilder().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId('setup:sel:cmdpolicy:edit:' + wingId)
-        .setPlaceholder('Toggle a permission for this wing')
-        .addOptions(perms.map((p) => ({
-          label: p.charAt(0).toUpperCase() + p.slice(1),
-          value: p,
-          description: 'Toggle ' + p + ' permission for ' + (wing.label || wingId)
-        })))
-    );
-
-    const backRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('setup:step:16').setLabel('Back').setStyle(ButtonStyle.Secondary),
-      navRow(guildId).components[1]
-    );
-
-    return { embeds: [embed], components: [selectRow, backRow] };
-  }
-
-  if (key.startsWith('cmdpolicy:edit:')) {
-    const wingId = key.replace('cmdpolicy:edit:', '');
-    const perm = values[0];
-    const cfgKey = 'cmdpolicy_' + wingId + '_' + perm;
-    const current = stateManager.getGuildSetting(guildId, cfgKey, 'deny');
-    const newVal = current === 'allow' ? 'deny' : 'allow';
-    stateManager.setGuildSetting(guildId, cfgKey, newVal);
-    const wings = stateManager.getWings(guildId);
-    const wing = wings.find((w) => w.id === wingId);
-    const embed = new EmbedBuilder()
-      .setColor(HALLOWS_ORANGE)
-      .setTitle('Command Policy: ' + (wing ? wing.label : wingId))
-      .setDescription([
-        '**' + perm.charAt(0).toUpperCase() + perm.slice(1) + '** is now **' + newVal.toUpperCase() + 'ED** for **' + (wing ? wing.label : wingId) + '**.',
-        '',
-        'Select another permission, or go back.'
-      ].join('\n'))
-      .setTimestamp();
-    const perms = ['reply', 'close', 'claim', 'transfer', 'escalate'];
-    const selectRow = new ActionRowBuilder().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId('setup:sel:cmdpolicy:edit:' + wingId)
-        .setPlaceholder('Toggle a permission')
-        .addOptions(perms.map((p) => ({
-          label: (stateManager.getGuildSetting(guildId, 'cmdpolicy_' + wingId + '_' + p, 'deny') === 'allow' ? '✓ ' : '') + p.charAt(0).toUpperCase() + p.slice(1),
-          value: p,
-          description: 'Current: ' + (stateManager.getGuildSetting(guildId, 'cmdpolicy_' + wingId + '_' + p, 'deny') === 'allow' ? 'Allowed' : 'Denied')
-        })))
-    );
-    const backRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('setup:step:16').setLabel('Back').setStyle(ButtonStyle.Secondary),
-      navRow(guildId).components[1]
-    );
-    return { embeds: [embed], components: [selectRow, backRow] };
+  if (key.startsWith('cmdpolicy:')) {
+    return renderStep(guildId, Number(stateManager.getGuildSetting(guildId, WIZARD_KEY, 0)), guild);
   }
 
   if (key.startsWith('category:')) {
@@ -415,63 +332,7 @@ async function handleWizardButtonInner(interaction) {
       return;
     }
 
-    if (targetStep === 4 && parts[3] === 'content') {
-      const modal = new ModalBuilder()
-        .setCustomId('setup_modal:panel_content')
-        .setTitle('Support Panel Config')
-        .addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('panel_text').setLabel('Embed text').setStyle(TextInputStyle.Paragraph).setRequired(true).setValue(config.supportPanel.content || 'Click the button below to open a ticket.')
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('button_id').setLabel('Button custom ID').setStyle(TextInputStyle.Short).setRequired(true).setValue(config.supportPanel.buttonId)
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('button_label').setLabel('Button label text').setStyle(TextInputStyle.Short).setRequired(true).setValue('Open Ticket')
-          )
-        );
-      await interaction.showModal(modal);
-      return;
-    }
-
-    if (targetStep === 6 && parts[3] === 'post') {
-      const channelId = config.supportPanel.channelId;
-      if (channelId) {
-        const channel = await interaction.client.channels.fetch(channelId).catch(() => null);
-        if (channel) {
-          const btnRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(config.supportPanel.buttonId).setLabel('Open Ticket').setStyle(ButtonStyle.Primary)
-          );
-          await channel.send({ content: config.supportPanel.content || 'Click the button below to open a ticket.', components: [btnRow] });
-        }
-      }
-      stateManager.setGuildSetting(guildId, WIZARD_KEY, '7');
-      await interaction.update(await renderStep(guildId, 7, guild));
-      return;
-    }
-
-    if (targetStep >= 20 && parts[3] === 'snippets') {
-      const snippets = config.policy.savedSnippets || {};
-      const names = Object.keys(snippets);
-      if (names.length) {
-        return renderSnippetList(interaction, guildId, guild, names);
-      }
-      const modal = new ModalBuilder()
-        .setCustomId('setup_modal:snippet:0')
-        .setTitle('Add a Saved Snippet')
-        .addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('snippet_name').setLabel('Name (e.g. hi, wait, askproof)').setStyle(TextInputStyle.Short).setRequired(true)
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('snippet_message').setLabel('Message content').setStyle(TextInputStyle.Paragraph).setRequired(true)
-          )
-        );
-      await interaction.showModal(modal);
-      return;
-    }
-
-    if (targetStep === 21 && parts[3] === 'aliases') {
+    if (targetStep >= 21 && parts[3] === 'aliases') {
       const current = stateManager.getGuildSetting(guildId, 'ticket_commands', '');
       const defaultAliases = { reply: '?r', close: '?close', claim: '?c', transfer: '?transfer', escalate: '?escalate' };
       let aliases;
@@ -608,34 +469,6 @@ async function handleWizardButtonInner(interaction) {
         .addComponents(
           new ActionRowBuilder().addComponents(
             new TextInputBuilder().setCustomId('demote_exempt_ids').setLabel('Role IDs (comma-separated)').setStyle(TextInputStyle.Paragraph).setRequired(false)
-          )
-        );
-      await interaction.showModal(modal);
-      return;
-    }
-
-    if (targetStep === 61 && parts[3] === 'apps') {
-      const curChan = stateManager.getGuildSetting(guildId, 'APPS_REVIEW_CHANNEL_ID', '');
-      const curRole = stateManager.getGuildSetting(guildId, 'APPS_APPROVED_ROLE_ID', '');
-      const curGhost = stateManager.getGuildSetting(guildId, 'APPS_GHOST_PING_CHANNEL_ID', '');
-      const modal = new ModalBuilder()
-        .setCustomId('setup_modal:apps')
-        .setTitle('Applications Config')
-        .addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('apps_channel').setLabel('Review channel ID').setStyle(TextInputStyle.Short).setRequired(false).setValue(curChan)
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('apps_role').setLabel('Approved applicant role ID').setStyle(TextInputStyle.Short).setRequired(false).setValue(curRole)
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('apps_ghost').setLabel('Ghost ping channel ID').setStyle(TextInputStyle.Short).setRequired(false).setValue(curGhost)
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('apps_approve_dm').setLabel('Approve DM message').setStyle(TextInputStyle.Paragraph).setRequired(false).setValue(config.approveDmMessage || '')
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('apps_reject_dm').setLabel('Reject DM message').setStyle(TextInputStyle.Paragraph).setRequired(false).setValue(config.rejectDmMessage || '')
           )
         );
       await interaction.showModal(modal);
@@ -832,45 +665,6 @@ async function handleWizardButtonInner(interaction) {
     stateManager.setGuildSetting(guildId, `branch_${wingId}_global`, newVal);
     const cur = Number(stateManager.getGuildSetting(guildId, WIZARD_KEY, 0));
     await interaction.update(await renderStep(guildId, cur, guild));
-    return;
-  }
-
-  if (customId === 'setup:cmdpolicy') {
-    const wings = stateManager.getWings(guildId);
-    if (!wings.length) {
-      await interaction.update({ embeds: [new EmbedBuilder().setColor(HALLOWS_ORANGE).setTitle('No Wings').setDescription('No wings configured yet. Set up wings first.').setTimestamp()], components: [navRow(guildId)] });
-      return;
-    }
-    const cmdKeys = ['reply', 'close', 'claim', 'unclaim', 'transfer', 'escalate', 'snippets', 'help', 'timer'];
-    const embed = new EmbedBuilder()
-      .setColor(HALLOWS_ORANGE)
-      .setTitle('Command Policies')
-      .setDescription([
-        'Each command can be restricted to specific wings.',
-        'Select a wing below to see its current policy, or pick a command to edit.',
-        '',
-        'Current defaults: All wings can reply/close their own tickets.',
-        'Only Internals can escalate/transfer across wings.'
-      ].join('\n'))
-      .setTimestamp();
-
-    const wingOptions = wings.slice(0, 25).map((w) => ({
-      label: w.label || w.id, value: w.id, description: 'Edit command policy for this wing'
-    }));
-
-    const row = new ActionRowBuilder().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId('setup:sel:cmdpolicy:wing')
-        .setPlaceholder('Select a wing to configure')
-        .addOptions(wingOptions.length ? wingOptions : [{ label: 'No wings', value: '_none' }])
-    );
-
-    const backRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('setup:step:16').setLabel('Back').setStyle(ButtonStyle.Secondary),
-      navRow(guildId).components[1]
-    );
-
-    await interaction.update({ embeds: [embed], components: [row, backRow] });
     return;
   }
 
@@ -1074,26 +868,6 @@ async function handleWizardModalInner(interaction) {
     return;
   }
 
-  if (customId === 'setup_modal:panel_content') {
-    const text = fields.getTextInputValue('panel_text').trim();
-    const buttonId = fields.getTextInputValue('button_id').trim();
-    const buttonLabel = fields.getTextInputValue('button_label').trim();
-    if (text) {
-      setOverride('SUPPORT_PANEL_CONTENT', text);
-      stateManager.setGuildSetting(guildId, 'SUPPORT_PANEL_CONTENT', text);
-    }
-    if (buttonId) {
-      setOverride('SUPPORT_PANEL_BUTTON_ID', buttonId);
-      stateManager.setGuildSetting(guildId, 'SUPPORT_PANEL_BUTTON_ID', buttonId);
-    }
-    if (buttonLabel) {
-      stateManager.setGuildSetting(guildId, 'SUPPORT_PANEL_BUTTON_LABEL', buttonLabel);
-    }
-    const cur = Number(stateManager.getGuildSetting(guildId, WIZARD_KEY, 0));
-    await interaction.update(await renderStep(guildId, cur, guild));
-    return;
-  }
-
   if (customId.startsWith('setup_modal:wing:')) {
     const wingIndex = parseInt(customId.split(':')[2], 10);
     const wingId = fields.getTextInputValue('wing_id').trim();
@@ -1239,53 +1013,6 @@ async function handleWizardModalInner(interaction) {
     return;
   }
 
-  if (customId.startsWith('setup_modal:branch:')) {
-    const wingId = customId.replace('setup_modal:branch:', '');
-    stateManager.setGuildSetting(guildId, `branchPolicy_${wingId}_ping`, fields.getTextInputValue('branch_ping').trim());
-    stateManager.setGuildSetting(guildId, `branchPolicy_${wingId}_reply`, fields.getTextInputValue('branch_reply').trim());
-    stateManager.setGuildSetting(guildId, `branchPolicy_${wingId}_close`, fields.getTextInputValue('branch_close').trim());
-    await interaction.update(await renderStep(guildId, Number(stateManager.getGuildSetting(guildId, WIZARD_KEY, 0)), guild));
-    return;
-  }
-
-  if (customId === 'setup_modal:aliases') {
-    try {
-      const json = JSON.parse(fields.getTextInputValue('aliases_json').trim());
-      stateManager.setGuildSetting(guildId, 'ticket_commands', JSON.stringify(json));
-    } catch { /* ignore bad JSON */ }
-    const cur = Number(stateManager.getGuildSetting(guildId, WIZARD_KEY, 0));
-    await interaction.update(await renderStep(guildId, cur, guild));
-    return;
-  }
-
-  if (customId.startsWith('setup_modal:snippet:')) {
-    const name = fields.getTextInputValue('snippet_name').trim();
-    const message = fields.getTextInputValue('snippet_message').trim();
-    if (name && message) {
-      if (!config.policy.savedSnippets) config.policy.savedSnippets = {};
-      config.policy.savedSnippets[name] = { message, embed: null };
-      const allSnippets = { ...config.policy.savedSnippets };
-      stateManager.setGuildSetting(guildId, '_snippets_json', JSON.stringify(allSnippets));
-    }
-    const names = Object.keys(config.policy.savedSnippets || {});
-    const embed = wizardEmbed(guildId, 'Snippet Saved', [
-      names.length ? `**Saved snippets:**\n${names.map((n) => `• **${n}**`).join('\n')}` : '',
-      '',
-      'Add another, or click **Done**.'
-    ].join('\n'));
-    await interaction.update({
-      embeds: [embed],
-      components: [
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('setup:step:20:snippets').setLabel('Add Another').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId('setup:step:21').setLabel('Done →').setStyle(ButtonStyle.Success),
-          navRow(guildId)
-        )
-      ]
-    });
-    return;
-  }
-
   if (customId === 'setup_modal:appeal') {
     const link = fields.getTextInputValue('appeal_link').trim();
     if (link) {
@@ -1351,58 +1078,7 @@ async function handleWizardModalInner(interaction) {
     return;
   }
 
-  if (customId === 'setup_modal:apps') {
-    const channelId = fields.getTextInputValue('apps_channel').trim();
-    const roleId = fields.getTextInputValue('apps_role').trim();
-    const ghostId = fields.getTextInputValue('apps_ghost').trim();
-    const approveDm = fields.getTextInputValue('apps_approve_dm').trim();
-    const rejectDm = fields.getTextInputValue('apps_reject_dm').trim();
-    if (channelId) {
-      setOverride('DISCORD_CHANNEL_ID', channelId);
-      stateManager.setGuildSetting(guildId, 'DISCORD_CHANNEL_ID', channelId);
-    }
-    if (roleId) {
-      setOverride('APPROVED_APPLICANT_ROLE_ID', roleId);
-      stateManager.setGuildSetting(guildId, 'APPROVED_APPLICANT_ROLE_ID', roleId);
-    }
-    if (ghostId) {
-      setOverride('APPROVE_GHOST_PING_CHANNEL_ID', ghostId);
-      stateManager.setGuildSetting(guildId, 'APPROVE_GHOST_PING_CHANNEL_ID', ghostId);
-    }
-    if (approveDm) {
-      setOverride('APPROVE_DM_MESSAGE', approveDm);
-      stateManager.setGuildSetting(guildId, 'APPROVE_DM_MESSAGE', approveDm);
-    }
-    if (rejectDm) {
-      setOverride('REJECT_DM_MESSAGE', rejectDm);
-      stateManager.setGuildSetting(guildId, 'REJECT_DM_MESSAGE', rejectDm);
-    }
-    const cur = Number(stateManager.getGuildSetting(guildId, WIZARD_KEY, 0));
-    await interaction.update(await renderStep(guildId, cur, guild));
-    return;
-  }
-
   await interaction.reply({ content: 'Unknown modal.', ephemeral: true });
-}
-
-async function renderSnippetList(interaction, guildId, guild, names) {
-  const embed = wizardEmbed(guildId, 'Saved Snippets', [
-    'Existing snippets:',
-    '',
-    names.map((n) => `• **${n}**`).join('\n') || '*None*',
-    '',
-    'Click **Add** to create another, or **Done**.'
-  ].join('\n'));
-  await interaction.update({
-    embeds: [embed],
-    components: [
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('setup:step:20:snippets').setLabel('Add Another').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('setup:step:21').setLabel('Done →').setStyle(ButtonStyle.Success),
-        navRow(guildId).components[0], navRow(guildId).components[1]
-      )
-    ]
-  });
 }
 
 export {

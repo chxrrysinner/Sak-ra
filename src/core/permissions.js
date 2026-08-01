@@ -24,65 +24,21 @@ const FAKE_PERMISSION_FLAGS = {
   'staff.strikesOthers': { bit: null, label: 'View Others Strikes' },
   'staff.removeStrike': { bit: null, label: 'Remove Strikes' },
   'staff.breaks.manage': { bit: null, label: 'Manage Staff Breaks' },
-  'staff.performancePlans': { bit: null, label: 'Manage Performance Plans' },
-  'tickets.forceClose': { bit: null, label: 'Force Close Tickets' },
-  'tickets.start': { bit: null, label: 'Start Tickets Remotely' },
-  'tickets.overrideClaims': { bit: null, label: 'Override Ticket Claims' },
   'security.pban': { bit: null, label: 'Start PBAN Proposals' },
   'security.addproof': { bit: null, label: 'Add Ban Proof' },
   'admin.hideMessage': { bit: null, label: 'Hide Bot Messages' },
   'state.manage': { bit: null, label: 'Manage Persistent State' }
 };
 
-const DEPARTMENTS = {
-  assistants: {
-    label: 'Assistants',
-    description: 'Contact assistants for general server support.',
-    categoryEnv: ['ASSISTANTS_CATEGORY_ID', 'GENERAL_CATEGORY_ID'],
-    channelPrefix: 'general'
-  },
-  partnership: {
-    label: 'Partnership',
-    description: 'Contact the partnership wing.',
-    categoryEnv: 'PARTNERSHIP_CATEGORY_ID',
-    channelPrefix: 'partner'
-  },
-  moderation: {
-    label: 'Moderation',
-    description: 'Report a member to the moderation wing.',
-    categoryEnv: 'REPORT_CATEGORY_ID',
-    channelPrefix: 'report'
-  },
-  hr: {
-    label: 'HR',
-    description: 'Contact the HR wing.',
-    categoryEnv: 'HR_CATEGORY_ID',
-    channelPrefix: 'hr'
-  },
-  internals: {
-    label: 'Internals',
-    description: 'Contact the internals wing.',
-    categoryEnv: ['INTERNALS_CATEGORY_ID', 'STAFF_APPLICATION_CATEGORY_ID'],
-    channelPrefix: 'internals'
-  }
-};
-
-const DEPARTMENT_ALIASES = {
-  general: 'assistants',
-  support: 'assistants',
-  assistant: 'assistants',
-  report: 'moderation',
-  reports: 'moderation',
-  mod: 'moderation',
-  moderation: 'moderation',
-  moderations: 'moderation',
-  manage: 'internals',
-  management: 'internals',
-  staff_application: 'internals',
-  applications: 'internals'
-};
-
 const WING_ORDER = ['internals', 'hr', 'partnership', 'moderation', 'assistants'];
+
+const STAFF_HIERARCHY_WINGS = {
+  internals: 'Internals',
+  hr: 'HR',
+  partnership: 'Partnership',
+  moderation: 'Moderation',
+  assistants: 'Assistants'
+};
 
 const STAFF_HIERARCHY_ALIASES = {
   int: 'internals',
@@ -114,65 +70,10 @@ function ROLE_POLICY() {
   if (override && typeof override === 'object') return override;
   return config.policy.rolePolicy || {};
 }
-function TICKET_BRANCH_POLICY() { return config.policy.ticketBranchPolicy || {}; }
-function MODMAIL_COMMAND_POLICY() { return config.policy.modmailCommandPolicy || {}; }
-
-const STAFF_HIERARCHY_WINGS = {
-  internals: 'Internals',
-  hr: 'HR',
-  partnership: 'Partnership',
-  moderation: 'Moderation',
-  assistants: 'Assistants'
-};
-
-function normalizeDepartmentId(value, guildId) {
-  if (!value) return null;
-  if (guildId) {
-    const wings = resolveWings(guildId);
-    if (wings[value]) return value;
-  }
-  return DEPARTMENTS[value] ? value : DEPARTMENT_ALIASES[value] || null;
-}
-
-function departmentFor(value, guildId) {
-  const id = normalizeDepartmentId(value, guildId);
-  if (!id) return null;
-  if (guildId) {
-    const wings = resolveWings(guildId);
-    if (wings[id]) return { id, ...wings[id] };
-  }
-  return id ? { id, ...DEPARTMENTS[id] } : null;
-}
-
-function categoryEnvKeysFor(department) {
-  return Array.isArray(department.categoryEnv) ? department.categoryEnv : [department.categoryEnv];
-}
-
-function categoryEnvLabel(department) {
-  return categoryEnvKeysFor(department).join(' or ');
-}
-
-function categoryIdFor(departmentId, guildId) {
-  if (guildId) {
-    const wing = stateManager.getWing(guildId, departmentId);
-    if (wing?.category_id) return wing.category_id;
-  }
-  const department = departmentFor(departmentId, guildId);
-  if (!department) return null;
-  for (const key of categoryEnvKeysFor(department)) {
-    if (process.env[key]) return process.env[key];
-  }
-  return null;
-}
-
-function teamNameForDepartment(departmentId, guildId) {
-  const department = departmentFor(departmentId, guildId);
-  return department ? `${department.label} wing` : 'support wing';
-}
 
 function normalizeStaffWingId(value) {
   if (!value) return null;
-  return normalizeDepartmentId(value) || STAFF_HIERARCHY_ALIASES[value] || null;
+  return STAFF_HIERARCHY_WINGS[value] ? value : STAFF_HIERARCHY_ALIASES[value] || null;
 }
 
 function rolePolicyValueParts(value) {
@@ -215,6 +116,14 @@ function roleIdForPolicyEntry(entry) {
   return rolePolicyEntryParts(entry).roleId || null;
 }
 
+function staffHierarchyEntriesForWing(wingId = null) {
+  const hierarchy = ROLE_POLICY().staffHierarchy;
+  if (Array.isArray(hierarchy)) return hierarchy;
+  if (!hierarchy || typeof hierarchy !== 'object') return [];
+  if (wingId) return hierarchy[normalizeStaffWingId(wingId)] || [];
+  return Object.values(hierarchy).flatMap((entries) => Array.isArray(entries) ? entries : []);
+}
+
 function sortedStaffHierarchyPartsForWing(wingId) {
   const normalizedWingId = normalizeStaffWingId(wingId);
   return staffHierarchyEntriesForWing(wingId)
@@ -222,14 +131,6 @@ function sortedStaffHierarchyPartsForWing(wingId) {
     .map((entry) => ({ ...entry, wingId: normalizedWingId, isInternal: entry.isInternal || normalizedWingId === 'internals' }))
     .filter((entry) => entry.roleId)
     .sort((a, b) => (a.level || 0) - (b.level || 0));
-}
-
-function staffHierarchyEntriesForWing(wingId = null) {
-  const hierarchy = ROLE_POLICY().staffHierarchy;
-  if (Array.isArray(hierarchy)) return hierarchy;
-  if (!hierarchy || typeof hierarchy !== 'object') return [];
-  if (wingId) return hierarchy[normalizeStaffWingId(wingId)] || [];
-  return Object.values(hierarchy).flatMap((entries) => Array.isArray(entries) ? entries : []);
 }
 
 function allStaffHierarchyParts() {
@@ -285,22 +186,8 @@ function roleAuthorityForWing(member, wingId) {
   return authorityValues.length ? Math.max(...authorityValues) : 0;
 }
 
-function ticketClaimAuthority(member, wingId) {
-  if (roleAuthorityForWing(member, 'internals') > 0) return 3_000_000;
-  if (roleAuthorityForWing(member, 'hr') > 0) return 2_000_000;
-  return roleAuthorityForWing(member, wingId);
-}
-
-function globalTicketCommandBypassRoleIds() {
-  return staffRoleHierarchyIds('internals');
-}
-
 function commandRoleIds(commandName) {
   return roleIdsForRankNames(ROLE_POLICY().commands?.[commandName]);
-}
-
-function roleIdsFor(departmentId, roleType) {
-  return roleIdsForRankNames(TICKET_BRANCH_POLICY()[normalizeDepartmentId(departmentId)]?.[roleType]);
 }
 
 function leadHierarchyPartForWing(wingId) {
@@ -378,109 +265,6 @@ async function memberHasAnyRole(guildId, userId, roleIds) {
   return roleIds.some((roleId) => member.roles.cache.has(roleId));
 }
 
-async function memberCanUseCommand(guildId, userId, permission) {
-  return memberHasAnyRole(guildId, userId, commandRoleIds(permission));
-}
-
-async function memberCanUseClaimedTicketCommands(guildId, userId, ticket) {
-  if (ticket.claimedByStaffUserId === userId) return true;
-  return memberCanUseCommand(guildId, userId, 'overrideClaims');
-}
-
-async function memberCanBypassTicketCommandPolicy(guildId, userId) {
-  return memberHasAnyRole(guildId, userId, globalTicketCommandBypassRoleIds());
-}
-
-async function commandCanRunInTicketBranchForMember(message, commandPolicy, departmentId) {
-  const member = message.member || await message.guild?.members.fetch(message.author.id).catch(() => null);
-  if (member && memberHasGlobalWing(member)) return true;
-  return commandCanRunInTicketBranch(commandPolicy, departmentId)
-    || await memberCanBypassTicketCommandPolicy(message.guild.id, message.author.id);
-}
-
-function memberCanTakeOverClaim(message, ticket) {
-  if (!ticket.claimedByStaffUserId || ticket.claimedByStaffUserId === message.author.id) return true;
-  const claimant = message.guild.members.cache.get(ticket.claimedByStaffUserId);
-  if (!claimant) return true;
-  const actor = message.member;
-  if (!actor) return false;
-  const wingId = normalizeDepartmentId(ticket.departmentId);
-  return ticketClaimAuthority(actor, wingId) > ticketClaimAuthority(claimant, wingId);
-}
-
-function memberHasTicketClaimAuthority(message, ticket) {
-  const member = message.member;
-  return member ? ticketClaimAuthority(member, normalizeDepartmentId(ticket.departmentId)) > 0 : false;
-}
-
-function claimTakeoverDeniedMessage(message, ticket) {
-  const wing = departmentFor(ticket.departmentId)?.label || 'this wing';
-  return `This ticket is already claimed by **${ticket.claimedByStaffTag || 'another staff member'}**. You need a higher ${wing} hierarchy rank, that wing's lead role, HR, or Internals to take it over.`;
-}
-
-function modmailPrefixCommandPolicy(commandKey, guildId) {
-  if (guildId) {
-    const stored = stateManager.getGuildSetting(guildId, '_modmail_policy', '');
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        return parsed.prefixCommands?.[commandKey] || parsed[commandKey] || null;
-      } catch {}
-    }
-  }
-  return MODMAIL_COMMAND_POLICY().prefixCommands?.[commandKey] || null;
-}
-
-function savedSnippetCommandPolicy(snippet) {
-  const snippetKey = Object.entries(config.policy.savedSnippets || {}).find(([, candidate]) => candidate === snippet)?.[0];
-  return snippetKey ? MODMAIL_COMMAND_POLICY().savedSnippetCommands?.[snippetKey] || null : null;
-}
-
-function commandCanRunInTicketBranch(commandPolicy, departmentId) {
-  const normalizedDepartmentId = normalizeDepartmentId(departmentId);
-  return !commandPolicy?.allowedBranches
-    || commandPolicy.allowedBranches.some((branch) => normalizeDepartmentId(branch) === normalizedDepartmentId);
-}
-
-function ticketPermissionNamesForCommand(commandPolicy, departmentId) {
-  const normalizedDepartmentId = normalizeDepartmentId(departmentId);
-  return commandPolicy?.ticketPermissionsByBranch?.[normalizedDepartmentId]
-    || (commandPolicy?.ticketPermission ? [commandPolicy.ticketPermission] : []);
-}
-
-function ticketRoleIdsForCommand(commandPolicy, departmentId) {
-  return [...new Set(ticketPermissionNamesForCommand(commandPolicy, departmentId)
-    .flatMap((permission) => roleIdsFor(departmentId, permission)))];
-}
-
-function ticketRankNamesForCommand(commandPolicy, departmentId) {
-  const normalizedDepartmentId = normalizeDepartmentId(departmentId);
-  return [...new Set(ticketPermissionNamesForCommand(commandPolicy, departmentId)
-    .flatMap((permission) => TICKET_BRANCH_POLICY()[normalizedDepartmentId]?.[permission] || []))];
-}
-
-function ticketStartRoleIds() {
-  const fromCommand = commandRoleIds('tstart');
-  return fromCommand.length ? fromCommand : [...new Set([
-    ...WING_ORDER.flatMap((wingId) => {
-      const leadPart = leadHierarchyPartForWing(wingId);
-      return leadPart?.roleId ? [leadPart.roleId] : [];
-    }),
-    ...staffRoleHierarchyIds('internals')
-  ])];
-}
-
-function demoteCommandRoleIds() {
-  return [...new Set([
-    ...staffRoleHierarchyIds('hr'),
-    ...staffRoleHierarchyIds('internals')
-  ])];
-}
-
-function demoteExemptRoleIds() {
-  return roleIdsForRankNames(ROLE_POLICY().demoteExempt);
-}
-
 async function syncCategoryRoleForWing(member, wingId, auditReason) {
   const byWing = categoryRoleIdsByWing();
   const targetRoleId = byWing[wingId] || null;
@@ -508,11 +292,6 @@ async function syncLeadCategoryRole(member, auditReason = 'Lead category role sy
   }
 }
 
-async function memberCanRunDemote(interaction) {
-  if (!interaction.guildId) return false;
-  return memberHasAnyRole(interaction.guildId, interaction.user.id, demoteCommandRoleIds());
-}
-
 async function removeCategoryRoleForWing(member, wingId, auditReason) {
   const roleId = categoryRoleIdsByWing()[wingId];
   if (roleId && member.roles.cache.has(roleId)) {
@@ -520,40 +299,20 @@ async function removeCategoryRoleForWing(member, wingId, auditReason) {
   }
 }
 
-function formatDepartmentList(departmentIds) {
-  const labels = departmentIds
-    .map((departmentId) => departmentFor(departmentId)?.label || departmentId)
-    .filter(Boolean);
-  if (labels.length <= 1) return labels[0] || 'the configured wing';
-  if (labels.length === 2) return `${labels[0]} or ${labels[1]}`;
-  return `${labels.slice(0, -1).join(', ')}, or ${labels[labels.length - 1]}`;
-}
-
-function restrictedTicketBranchMessage(commandPolicy, commandName) {
-  const allowedDepartments = formatDepartmentList(commandPolicy?.allowedBranches || []);
-  return `You need to be part of the ${allowedDepartments} wing to use **${commandName}**.`;
-}
-
-function staffWingNameFor(value) {
-  const id = normalizeStaffWingId(value);
-  return id ? STAFF_HIERARCHY_WINGS[id] || departmentFor(id)?.label || id : value;
-}
-
-async function memberCanUsePrefixRoles(guildId, userId, roleIds) {
-  return await memberHasAnyRole(guildId, userId, globalTicketCommandBypassRoleIds())
-    || await memberHasAnyRole(guildId, userId, roleIds);
-}
-
-async function memberCanUsePolicyCommand(guildId, userId, commandName) {
-  return memberHasAnyRole(guildId, userId, commandRoleIds(commandName));
-}
-
-function performancePlanRoleIds() {
-  const fromCommand = commandRoleIds('performancePlans');
-  return fromCommand.length ? fromCommand : [...new Set([
+function demoteCommandRoleIds() {
+  return [...new Set([
     ...staffRoleHierarchyIds('hr'),
     ...staffRoleHierarchyIds('internals')
   ])];
+}
+
+function demoteExemptRoleIds() {
+  return roleIdsForRankNames(ROLE_POLICY().demoteExempt);
+}
+
+async function memberCanRunDemote(interaction) {
+  if (!interaction.guildId) return false;
+  return memberHasAnyRole(interaction.guildId, interaction.user.id, demoteCommandRoleIds());
 }
 
 function pbanVoteRankForHierarchyPart(part) {
@@ -567,12 +326,10 @@ function pbanVoteRankForHierarchyPart(part) {
 }
 
 function pbanVoteWeight(rank, guildId, roleId) {
-  // Check DB for custom weight first
   if (guildId && roleId) {
     const dbWeight = stateManager.getPbanVoteWeight(guildId, roleId);
     if (dbWeight !== null) return dbWeight;
   }
-  // Fall back to hardcoded weights
   const weights = {
     assistant: 2,
     brew: 3,
@@ -644,7 +401,7 @@ function allBreakRemovableStaffRoleIds() {
 }
 
 function staffListRoleIdsForGroup(group) {
-  return group.staffWingId ? staffRoleHierarchyIds(group.staffWingId) : roleIdsFor(group.departmentId, 'ping');
+  return group.staffWingId ? staffRoleHierarchyIds(group.staffWingId) : [];
 }
 
 function staffListPartsForRoleIds(wingId, roleIds) {
@@ -676,10 +433,15 @@ function staffListRankLabel(parts) {
   return bestPart.level ? ` (rank ${bestPart.level})` : '';
 }
 
+function staffWingNameFor(value) {
+  const id = normalizeStaffWingId(value);
+  return id ? STAFF_HIERARCHY_WINGS[id] || id : value;
+}
+
 function resolveWings(guildId) {
-  if (!guildId || !stateManager.initialized) return DEPARTMENTS;
+  if (!guildId || !stateManager.initialized) return {};
   const dbWings = stateManager.getWings(guildId);
-  if (!dbWings.length) return DEPARTMENTS;
+  if (!dbWings.length) return {};
   const result = {};
   for (const w of dbWings) {
     result[w.id] = {
@@ -692,9 +454,9 @@ function resolveWings(guildId) {
 }
 
 function resolveWingOrder(guildId) {
-  if (!guildId || !stateManager.initialized) return WING_ORDER;
+  if (!guildId || !stateManager.initialized) return [];
   const dbWings = stateManager.getWings(guildId);
-  if (!dbWings.length) return WING_ORDER;
+  if (!dbWings.length) return [];
   return dbWings.map((w) => w.id);
 }
 
@@ -747,35 +509,24 @@ function memberHasPermission(member, flag) {
 }
 
 export {
-  DEPARTMENTS,
-  DEPARTMENT_ALIASES,
   WING_ORDER,
   STAFF_HIERARCHY_WINGS,
   STAFF_HIERARCHY_ALIASES,
   INTERNAL_HIERARCHY_LEVEL,
-  normalizeDepartmentId,
-  departmentFor,
-  categoryEnvKeysFor,
-  categoryEnvLabel,
-  categoryIdFor,
-  teamNameForDepartment,
   normalizeStaffWingId,
   rolePolicyValueParts,
   configuredRoleIdForToken,
   rolePolicyEntryParts,
   roleIdForPolicyEntry,
-  sortedStaffHierarchyPartsForWing,
   staffHierarchyEntriesForWing,
+  sortedStaffHierarchyPartsForWing,
   allStaffHierarchyParts,
   hierarchyReferencePartsForEntry,
   roleIdsForPolicyEntry,
   roleIdsForRankNames,
   staffRoleHierarchyIds,
   roleAuthorityForWing,
-  ticketClaimAuthority,
-  globalTicketCommandBypassRoleIds,
   commandRoleIds,
-  roleIdsFor,
   leadHierarchyPartForWing,
   leadHierarchyRoleIds,
   categoryRoleIdsByWing,
@@ -790,32 +541,12 @@ export {
   inferredStaffWingId,
   memberHasAnyCachedRole,
   memberHasAnyRole,
-  memberCanRunDemote,
-  memberCanUseCommand,
-  memberCanUseClaimedTicketCommands,
-  memberCanBypassTicketCommandPolicy,
-  commandCanRunInTicketBranch,
-  commandCanRunInTicketBranchForMember,
-  memberCanTakeOverClaim,
   syncCategoryRoleForWing,
   syncLeadCategoryRole,
   removeCategoryRoleForWing,
-  formatDepartmentList,
-  restrictedTicketBranchMessage,
-  staffWingNameFor,
-  memberCanUsePrefixRoles,
-  memberCanUsePolicyCommand,
-  memberHasTicketClaimAuthority,
-  claimTakeoverDeniedMessage,
-  modmailPrefixCommandPolicy,
-  savedSnippetCommandPolicy,
-  ticketPermissionNamesForCommand,
-  ticketRoleIdsForCommand,
-  ticketRankNamesForCommand,
-  ticketStartRoleIds,
   demoteCommandRoleIds,
   demoteExemptRoleIds,
-  performancePlanRoleIds,
+  memberCanRunDemote,
   pbanVoteRankForHierarchyPart,
   pbanVoteWeight,
   highestPbanVote,
@@ -830,6 +561,7 @@ export {
   staffListBestPart,
   staffListSortValue,
   staffListRankLabel,
+  staffWingNameFor,
   resolveWings,
   resolveWingOrder,
   resolveWingRoles,

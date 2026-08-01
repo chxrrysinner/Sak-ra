@@ -1,6 +1,7 @@
 import stateManager from '../../core/state.js';
 import { findGuild } from '../../bridge.js';
 import client from '../../core/client.js';
+import config from '../../core/config.js';
 import { styledEmbed, trimTo } from '../../core/embeds.js';
 import {
   normalizeStaffWingId, staffWingNameFor, numberedHierarchyPartsForWing,
@@ -12,7 +13,7 @@ import {
   memberHasAnyCachedRole, memberHasAnyRole, demoteCommandRoleIds
 } from '../../core/permissions.js';
 
-const ROLE_POLICY_FILE = process.env.ROLE_POLICY_FILE || './role-policy.json';
+const ROLE_POLICY_FILE =       config.paths.rolePolicyFile || './role-policy.json';
 
 async function demoteUser(author, targetUser, reason, wingOpt, guild) {
   const guildMember = await guild.members.fetch(targetUser.id).catch(() => null);
@@ -89,7 +90,7 @@ async function demoteUser(author, targetUser, reason, wingOpt, guild) {
           '',
           `**Reason:** ${reason}`,
           '',
-          'To review more specific details, please open a ticket in modmail under the "Internals" section.'
+          'To review more specific details, please contact the Internals wing.'
         ].join('\n'),
         allowedMentions: { parse: [] }
       }).catch(() => null);
@@ -148,7 +149,7 @@ async function demoteUser(author, targetUser, reason, wingOpt, guild) {
 async function handleSlashCommand(interaction) {
   const allowed = await memberCanRunDemote(interaction);
   if (!allowed) {
-    await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+    await interaction.reply({ content: '\u200b', ephemeral: true }).catch(() => {});
     return;
   }
 
@@ -164,10 +165,7 @@ async function handleSlashCommand(interaction) {
 
 async function handlePrefixCommand(message, args, guildId) {
   const allowed = await memberHasAnyRole(guildId, message.author.id, demoteCommandRoleIds());
-  if (!allowed) {
-    await message.reply('You do not have permission to use this command.');
-    return;
-  }
+  if (!allowed) return;
 
   const parts = args.trim().split(/\s+/);
   if (parts.length < 2) {

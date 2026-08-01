@@ -9,7 +9,6 @@ class StateManager {
     this.dbPath = path.resolve(dbPath);
     this.db = null;
     this.cache = {
-      tickets: new Map(),
       settings: new Map()
     };
     this.initialized = false;
@@ -36,30 +35,6 @@ class StateManager {
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS tickets (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        channel_id TEXT,
-        department_id TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'open',
-        priority TEXT NOT NULL DEFAULT 'normal',
-        claimed_by TEXT,
-        claim_authority INTEGER,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        closed_at TEXT,
-        channel_name TEXT,
-        custom_name TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS ticket_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ticket_id INTEGER NOT NULL REFERENCES tickets(id),
-        user_id TEXT NOT NULL,
-        content TEXT,
-        attachment_urls TEXT,
-        timestamp TEXT NOT NULL DEFAULT (datetime('now'))
       );
 
       CREATE TABLE IF NOT EXISTS staff_hierarchy (
@@ -128,40 +103,6 @@ class StateManager {
         duration_ms INTEGER,
         reason TEXT NOT NULL,
         created_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS performance_plans (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        staff_id TEXT NOT NULL,
-        guild_id TEXT,
-        wing TEXT,
-        user_tag TEXT,
-        started_by_user_id TEXT,
-        started_by_tag TEXT,
-        completed_by_user_id TEXT,
-        completed_by_tag TEXT,
-        completed_at TEXT,
-        result_note TEXT,
-        reason TEXT NOT NULL,
-        goals TEXT NOT NULL,
-        due_date TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'active',
-        notes TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-
-      CREATE TABLE IF NOT EXISTS reviewed_applications (
-        response_id TEXT PRIMARY KEY,
-        posted_at TEXT NOT NULL,
-        approved BOOLEAN,
-        reviewed_by TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS timed_closes (
-        user_id TEXT PRIMARY KEY,
-        close_at TEXT NOT NULL,
-        warned_user BOOLEAN NOT NULL DEFAULT 0
       );
 
       CREATE TABLE IF NOT EXISTS guild_config (
@@ -436,9 +377,9 @@ class StateManager {
       CREATE TABLE IF NOT EXISTS channel_overrides (
         guild_id TEXT NOT NULL,
         channel_id TEXT NOT NULL,
-        node TEXT,
+        node TEXT NOT NULL DEFAULT '',
         mode TEXT NOT NULL DEFAULT 'deny',
-        PRIMARY KEY (guild_id, channel_id, coalesce(node, ''), mode)
+        PRIMARY KEY (guild_id, channel_id, node, mode)
       );
 
       CREATE TABLE IF NOT EXISTS audit_log (
@@ -466,18 +407,10 @@ class StateManager {
       /* column already exists */
     }
 
-    for (const col of ['guild_id','user_tag','started_by_user_id','started_by_tag','completed_by_user_id','completed_by_tag','completed_at','result_note']) {
-      try { this.db.exec(`ALTER TABLE performance_plans ADD COLUMN ${col} TEXT`); } catch { /* column exists */ }
-    }
-
     for (const col of ['guild_id','removed_role_ids','approved_by']) {
       try { this.db.exec(`ALTER TABLE staff_breaks ADD COLUMN ${col} TEXT`); } catch { /* column exists */ }
     }
     try { this.db.exec('ALTER TABLE staff_breaks ADD COLUMN message_count INTEGER NOT NULL DEFAULT 0'); } catch { /* column exists */ }
-
-    try {
-      this.db.exec('ALTER TABLE timed_closes ADD COLUMN user_id TEXT');
-    } catch { /* column exists or table was recreated */ }
   }
 
   getPrefix(guildId) {
@@ -1028,13 +961,13 @@ class StateManager {
     this.db.prepare(
       `INSERT OR REPLACE INTO channel_overrides (guild_id, channel_id, node, mode)
        VALUES (?, ?, ?, ?)`
-    ).run(guildId, channelId, node, mode);
+    ).run(guildId, channelId, node || '', mode);
   }
 
   removeChannelOverride(guildId, channelId, node, mode = 'deny') {
     this.db.prepare(
-      'DELETE FROM channel_overrides WHERE guild_id = ? AND channel_id = ? AND coalesce(node, \'\') = coalesce(?, \'\') AND mode = ?'
-    ).run(guildId, channelId, node, mode);
+      'DELETE FROM channel_overrides WHERE guild_id = ? AND channel_id = ? AND node = ? AND mode = ?'
+    ).run(guildId, channelId, node || '', mode);
   }
 
   getChannelOverrides(guildId, channelId) {
@@ -1170,10 +1103,6 @@ class StateManager {
     return result;
   }
 
-  getTicketByChannel(channelId) {
-    return this.db.prepare('SELECT * FROM tickets WHERE channel_id = ? AND status = \'open\'').get(channelId) || null;
-  }
-
   getUserWarnings(guildId, userId) {
     return this.db.prepare(
       "SELECT * FROM mod_cases WHERE guild_id = ? AND user_id = ? AND action = 'warn' ORDER BY created_at DESC"
@@ -1232,27 +1161,10 @@ class StateManager {
 
   loadAllState() {
     const state = {
-      ticketsByUserId: {},
-      pendingByUserId: {},
       strikesByUserId: {},
       pbanProposalsByMessageId: {},
       banProfilesByGuildUser: {}
     };
-
-    const tickets = this.db.prepare('SELECT * FROM tickets WHERE status = ?').all('open');
-    for (const t of tickets) {
-      state.ticketsByUserId[t.user_id] = {
-        channelId: t.channel_id,
-        guildId: null,
-        departmentId: t.department_id,
-        userTag: null,
-        userName: null,
-        openedAt: new Date(t.created_at).getTime(),
-        priority: t.priority,
-        claimedByStaffUserId: t.claimed_by,
-        history: []
-      };
-    }
 
     const strikes = this.db.prepare('SELECT * FROM strikes ORDER BY timestamp ASC').all();
     for (const s of strikes) {
@@ -1304,22 +1216,6 @@ class StateManager {
 
   saveAllState(state) {
     if (!state) return;
-
-    const insertTicket = this.db.prepare(
-      'INSERT OR REPLACE INTO tickets (user_id, channel_id, department_id, status, priority, claimed_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    );
-
-    const tx = this.db.transaction(() => {
-      this.db.prepare('DELETE FROM tickets WHERE status = ?').run('open');
-      for (const [userId, ticket] of Object.entries(state.ticketsByUserId || {})) {
-        insertTicket.run(
-          userId, ticket.channelId || null, ticket.departmentId || 'assistants',
-          'open', ticket.priority || 'normal', ticket.claimedByStaffUserId || null,
-          ticket.createdAt ? new Date(ticket.createdAt).toISOString() : new Date().toISOString()
-        );
-      }
-    });
-    try { tx(); } catch (e) { logger.error(e, 'Failed to save ticket state'); }
   }
 
   loadBreaksState() {
@@ -1351,6 +1247,7 @@ class StateManager {
         createdAt: new Date(r.created_at).getTime()
       };
     }
+
     return breakState;
   }
 
@@ -1368,7 +1265,13 @@ class StateManager {
     const deleteRequest = this.db.prepare('DELETE FROM break_requests WHERE user_id = ?');
     const tx = this.db.transaction(() => {
       this.db.prepare('DELETE FROM break_requests').run();
-      this.db.prepare('UPDATE staff_breaks SET status = ?, ended_at = ? WHERE status = ? AND user_id NOT IN (?)').run('ended', new Date().toISOString(), 'active', '');
+      const activeUserIds = Object.keys(breakState.activeByUserId || {});
+      if (activeUserIds.length) {
+        const placeholders = activeUserIds.map(() => '?').join(',');
+        this.db.prepare(`UPDATE staff_breaks SET status = ?, ended_at = ? WHERE status = ? AND user_id NOT IN (${placeholders})`).run('ended', new Date().toISOString(), 'active', ...activeUserIds);
+      } else {
+        this.db.prepare('UPDATE staff_breaks SET status = ?, ended_at = ? WHERE status = ?').run('ended', new Date().toISOString(), 'active');
+      }
       for (const [userId, br] of Object.entries(breakState.activeByUserId || {})) {
         const existing = this.db.prepare('SELECT id FROM staff_breaks WHERE user_id = ? AND status = ?').get(userId, 'active');
         if (existing) {
@@ -1399,112 +1302,6 @@ class StateManager {
       }
     });
     try { tx(); } catch (e) { logger.error(e, 'Failed to save break state'); }
-  }
-
-  loadPerformancePlansState() {
-    const state = { plansByUserId: {} };
-    const rows = this.db.prepare('SELECT * FROM performance_plans').all();
-    for (const p of rows) {
-      state.plansByUserId[p.user_id] = {
-        userId: p.user_id,
-        userTag: p.user_tag,
-        guildId: p.guild_id,
-        wingId: p.wing || null,
-        status: p.status,
-        startedByUserId: p.started_by_user_id || p.staff_id,
-        startedByTag: p.started_by_tag,
-        startedAt: new Date(p.created_at).getTime(),
-        dueAt: new Date(p.due_date).getTime(),
-        completedByUserId: p.completed_by_user_id,
-        completedByTag: p.completed_by_tag,
-        completedAt: p.completed_at ? new Date(p.completed_at).getTime() : null,
-        resultNote: p.result_note,
-        reason: p.reason,
-        goals: p.goals,
-        notes: JSON.parse(p.notes || '[]')
-      };
-    }
-    return state;
-  }
-
-  savePerformancePlansState(plansState) {
-    if (!plansState?.plansByUserId) return;
-    const tx = this.db.transaction(() => {
-      for (const plan of Object.values(plansState.plansByUserId)) {
-        const existing = this.db.prepare('SELECT id FROM performance_plans WHERE user_id = ?').get(plan.userId);
-        if (existing) {
-          this.db.prepare(`
-            UPDATE performance_plans SET
-              guild_id = ?, wing = ?, user_tag = ?, status = ?,
-              started_by_user_id = ?, started_by_tag = ?,
-              completed_by_user_id = ?, completed_by_tag = ?,
-              completed_at = ?, result_note = ?,
-              reason = ?, goals = ?, due_date = ?, notes = ?
-            WHERE user_id = ?
-          `).run(
-            plan.guildId, plan.wingId, plan.userTag, plan.status,
-            plan.startedByUserId, plan.startedByTag,
-            plan.completedByUserId || null, plan.completedByTag || null,
-            plan.completedAt ? new Date(plan.completedAt).toISOString() : null, plan.resultNote || null,
-            plan.reason, plan.goals,
-            new Date(plan.dueAt).toISOString(),
-            JSON.stringify(plan.notes || []),
-            plan.userId
-          );
-        } else {
-          this.db.prepare(`
-            INSERT INTO performance_plans (user_id, staff_id, guild_id, wing, user_tag, status,
-              started_by_user_id, started_by_tag, reason, goals, due_date, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(
-            plan.userId, plan.startedByUserId, plan.guildId, plan.wingId, plan.userTag, plan.status,
-            plan.startedByUserId, plan.startedByTag,
-            plan.reason, plan.goals,
-            new Date(plan.dueAt).toISOString(),
-            JSON.stringify(plan.notes || [])
-          );
-        }
-      }
-    });
-    tx();
-  }
-
-  loadReviewerState() {
-    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'reviewer_state'").get();
-    if (row) {
-      try { return JSON.parse(row.value); } catch { return null; }
-    }
-    return null;
-  }
-
-  saveReviewerState(reviewerState) {
-    if (!reviewerState) return;
-    this.db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('reviewer_state', JSON.stringify(reviewerState));
-  }
-
-  loadTimedCloseState() {
-    const state = { ticketsByUserId: {} };
-    const rows = this.db.prepare('SELECT * FROM timed_closes').all();
-    for (const t of rows) {
-      state.ticketsByUserId[t.user_id] = {
-        closeAt: new Date(t.close_at).getTime(),
-        warnedUser: Boolean(t.warned_user)
-      };
-    }
-    return state;
-  }
-
-  saveTimedCloseState(tcState) {
-    if (!tcState?.ticketsByUserId) return;
-    const upsert = this.db.prepare('INSERT OR REPLACE INTO timed_closes (user_id, close_at, warned_user) VALUES (?, ?, ?)');
-    const tx = this.db.transaction(() => {
-      this.db.prepare('DELETE FROM timed_closes').run();
-      for (const [userId, tc] of Object.entries(tcState.ticketsByUserId)) {
-        if (userId === 'undefined' || userId === 'null') continue;
-        upsert.run(userId, new Date(tc.closeAt).toISOString(), tc.warnedUser ? 1 : 0);
-      }
-    });
-    try { tx(); } catch (e) { logger.error(e, 'Failed to save timed close state'); }
   }
 
   close() {

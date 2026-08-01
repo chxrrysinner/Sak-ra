@@ -33,7 +33,6 @@
     "internals": "1516651334500094085"
   },
   "commands": {
-    "ping": ["all"],
     "help": ["all"],
     "snippets": ["all"],
     "preview": ["all"],
@@ -41,20 +40,18 @@
     "userInfo": ["all"],
     "claimInfo": ["all"],
     "closeInfo": ["all"],
-    "fclose": ["internals"],
-    "stafflist": ["internals", "hr"],
     "break": ["all"],
+    "ping": ["all"],
+    "fclose": ["internals"],
+    "tstart": ["M,assistants", "M,moderation", "M,partnership", "M,hr", "internals"],
+    "stafflist": ["internals", "hr"],
     "manageBreaks": ["internals", "hr"],
     "overrideClaims": ["internals", "hr", "M,moderation", "M,assistants", "M,partnership"],
-    "refresh": ["internals", "hr"],
-    "approve": ["internals", "hr"],
-    "reject": ["internals", "hr"],
     "strike": ["internals", "hr"],
-    "strikesOthers": ["M,internals", "I,internals"],
-    "removeStrike": ["M,internals", "I,internals"],
+    "strikesOthers": ["internals"],
+    "removeStrike": ["internals"],
     "pban": ["moderation", "internals"],
     "addproof": ["all-partnership"],
-    "cban": ["all-partnership"],
     "hiddenDeleteBotMessage": ["internals"]
   }
 }

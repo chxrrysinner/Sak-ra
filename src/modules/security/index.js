@@ -74,7 +74,14 @@ export default {
     modals: []
   },
   stateTables: ['pban_proposals', 'pban_votes', 'ban_profiles'],
-  onLoad: async (core) => {},
+  onLoad: async (core) => {
+    try {
+      const { default: handleAntiBotAutomodMessage } = await import('./automod.js');
+      core.client.on('messageCreate', handleAntiBotAutomodMessage);
+    } catch (error) {
+      core.logger?.error?.({ error: error.message }, 'Failed to load anti-bot automod');
+    }
+  },
   onReady: async (core) => {
     try {
       const { restorePbanProposals } = await import('./shared.js');

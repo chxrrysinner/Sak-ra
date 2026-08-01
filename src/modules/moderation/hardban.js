@@ -1,4 +1,4 @@
-import { getSuccessResponse,  runModAction, checkHierarchy, extractUserAndReason } from './shared.js';
+import { getSuccessResponse,  runModAction, checkHierarchy, extractUserAndReason, hasProtectedRole } from './shared.js';
 
 async function handlePrefixCommand(message, args, guildId) {
   const { userId, reason } = extractUserAndReason(args);
@@ -16,6 +16,10 @@ async function handlePrefixCommand(message, args, guildId) {
     const hierarchy = checkHierarchy(message.member, member);
     if (!hierarchy.allowed) {
       await message.reply(hierarchy.message);
+      return;
+    }
+    if (hasProtectedRole(member, guildId)) {
+      await message.reply('that user is protected.');
       return;
     }
   }
@@ -43,6 +47,10 @@ async function handleSlashCommand(interaction) {
     const hierarchy = checkHierarchy(interaction.member, member);
     if (!hierarchy.allowed) {
       await interaction.reply({ content: hierarchy.message, ephemeral: true });
+      return;
+    }
+    if (hasProtectedRole(member, guildId)) {
+      await interaction.reply({ content: 'that user is protected.', ephemeral: true });
       return;
     }
   }

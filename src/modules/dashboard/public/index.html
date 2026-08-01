@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hallows Dashboard</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <nav>
+    <div class="nav-brand">Hallows</div>
+    <div class="nav-links">
+      <a href="/" class="active">Overview</a>
+      <a href="/staff">Staff</a>
+      <a href="/permissions">Permissions</a>
+      <a href="/channels">Channels</a>
+      <a href="/tickets">Tickets</a>
+      <a href="/moderation">Moderation</a>
+      <a href="/settings">Settings</a>
+      <a href="/leveling">Leveling</a>
+      <a href="/starboard">Starboard</a>
+      <a href="/security">Security</a>
+      <a href="/autoroles">Auto-Roles</a>
+      <a href="/modules">Modules</a>
+      <a href="/logs">Logs</a>
+      <a href="/logout">Logout</a>
+    </div>
+  </nav>
+  <main>
+    <section id="overview" class="active">
+      <h1>Dashboard Overview</h1>
+      <p>Welcome to the Hallows web dashboard. Select a section above to configure your server.</p>
+      
+      <div class="stats-grid">
+        <div class="stat-card">
+          <h3>Permission Nodes</h3>
+          <p id="node-count">Loading...</p>
+        </div>
+        <div class="stat-card">
+          <h3>Wings (Departments)</h3>
+          <p id="wing-count">Loading...</p>
+        </div>
+        <div class="stat-card">
+          <h3>Active Tickets</h3>
+          <p id="ticket-count">Loading...</p>
+        </div>
+        <div class="stat-card">
+          <h3>Total Tickets</h3>
+          <p id="total-ticket-count">Loading...</p>
+        </div>
+        <div class="stat-card">
+          <h3>Closed Tickets</h3>
+          <p id="closed-ticket-count">Loading...</p>
+        </div>
+        <div class="stat-card">
+          <h3>Enabled Modules</h3>
+          <p id="module-count">Loading...</p>
+        </div>
+      </div>
+
+      <div class="overview-sections">
+        <div class="overview-section">
+          <h2>Recent Activity</h2>
+          <div id="recent-activity" class="recent-activity">
+            <p class="loading">Loading recent activity...</p>
+          </div>
+        </div>
+
+        <div class="overview-section">
+          <h2>Quick Actions</h2>
+          <div class="quick-actions">
+            <button class="quick-action-btn" onclick="showSection('permissions')">
+              <span class="quick-action-icon">🔐</span>
+              <span>Manage Permissions</span>
+            </button>
+            <button class="quick-action-btn" onclick="showSection('hierarchy')">
+              <span class="quick-action-icon">👥</span>
+              <span>Edit Hierarchy</span>
+            </button>
+            <button class="quick-action-btn" onclick="showSection('tickets')">
+              <span class="quick-action-icon">🎫</span>
+              <span>View Tickets</span>
+            </button>
+            <button class="quick-action-btn" onclick="showSection('modules')">
+              <span class="quick-action-icon">🧩</span>
+              <span>Manage Modules</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="channels">
+      <h1>Channels</h1>
+      <p>View all server channels and their configurations.</p>
+      
+      <div class="channels-toolbar">
+        <div class="channels-search">
+          <input type="text" id="channel-search-input" placeholder="Search channels..." class="search-input">
+        </div>
+        <div class="channels-filter">
+          <select id="channel-type-filter">
+            <option value="">All Types</option>
+            <option value="4">Categories</option>
+            <option value="0">Text</option>
+            <option value="2">Voice</option>
+            <option value="5">Announcement</option>
+            <option value="13">Stage</option>
+            <option value="15">Forum</option>
+          </select>
+        </div>
+        <button id="btn-refresh-channels" class="btn-secondary">Refresh</button>
+      </div>
+
+      <div class="channels-layout">
+        <div class="channels-tree-panel">
+          <div id="channels-tree" class="channels-tree">
+            <p class="loading">Loading channels...</p>
+          </div>
+        </div>
+        
+        <div class="channels-detail-panel">
+          <div id="channel-detail" class="channel-detail">
+            <p class="empty-state">Select a channel to view details</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="permissions">
+      <h1>Permissions (3-Layer System)</h1>
+      <p>Configure permission nodes, role assignments, and channel overrides.</p>
+      
+      <div class="permissions-layout">
+        <div class="permissions-sidebar">
+          <h3>Roles</h3>
+          <div id="roles-list" class="roles-list">
+            <p class="loading">Loading roles...</p>
+          </div>
+          
+          <h3 style="margin-top: 2rem;">Tools</h3>
+          <button id="btn-view-audit" class="btn-secondary">View Audit Log</button>
+          <button id="btn-apply-preset" class="btn-secondary">Apply Preset</button>
+        </div>
+        
+        <div class="permissions-main">
+          <div class="permissions-header">
+            <h2 id="selected-role-title">Select a role</h2>
+            <div class="permissions-actions">
+              <button id="btn-save-perms" class="btn-primary" disabled>Save Changes</button>
+              <button id="btn-cancel-perms" class="btn-secondary" disabled>Cancel</button>
+            </div>
+          </div>
+          
+          <div id="permission-tree" class="permission-tree">
+            <p class="empty-state">Select a role from the sidebar to edit permissions</p>
+          </div>
+        </div>
+      </div>
+      
+      <div id="audit-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2>Audit Log</h2>
+            <button class="modal-close" onclick="closeAuditModal()">&times;</button>
+          </div>
+          <div id="audit-log-content" class="modal-body">
+            <p class="loading">Loading audit log...</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="staff">
+      <h1>Staff Management</h1>
+      <p>Manage wings, role hierarchy, and fake permissions. Drag wings to reorder. Click a role to grant/revoke fake permissions.</p>
+      
+      <div class="hierarchy-layout">
+        <div class="hierarchy-sidebar">
+          <div class="hierarchy-header">
+            <h3>Wings</h3>
+            <button id="btn-add-wing" class="btn-icon" title="Add Wing">+</button>
+          </div>
+          <div class="hierarchy-search">
+            <input type="text" id="wing-search-input" placeholder="Search wings..." class="search-input">
+          </div>
+          <div id="wings-list" class="wings-list">
+            <p class="loading">Loading wings...</p>
+          </div>
+        </div>
+        
+        <div class="hierarchy-main">
+          <div id="staff-detail" class="staff-detail">
+            <p class="empty-state">Select a wing from the sidebar to view roles and permissions</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="wing-modal" class="modal" style="display: none;">
+        <div class="modal-content modal-small">
+          <div class="modal-header">
+            <h2 id="wing-modal-title">Add Wing</h2>
+            <button class="modal-close" onclick="closeWingModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <form id="wing-form">
+              <div class="form-group">
+                <label for="wing-id">Wing ID</label>
+                <input type="text" id="wing-id" required pattern="[a-z0-9_-]+" title="Lowercase letters, numbers, hyphens, underscores only">
+                <small>Unique identifier (lowercase, no spaces)</small>
+              </div>
+              <div class="form-group">
+                <label for="wing-label">Display Label</label>
+                <input type="text" id="wing-label" required maxlength="50">
+              </div>
+              <div class="form-group">
+                <label for="wing-prefix">Channel Prefix</label>
+                <input type="text" id="wing-prefix" required maxlength="20">
+              </div>
+              <div class="form-group">
+                <label for="wing-description">Description</label>
+                <textarea id="wing-description" rows="3" maxlength="200"></textarea>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn-secondary" onclick="closeWingModal()">Cancel</button>
+                <button type="submit" class="btn-primary">Save</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <div id="role-modal" class="modal" style="display: none;">
+        <div class="modal-content modal-medium">
+          <div class="modal-header">
+            <h2 id="role-modal-title">Edit Role — Fake Permissions</h2>
+            <button class="modal-close" onclick="closeRoleModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div id="staff-role-perms" class="staff-role-perms">
+              <p class="loading">Loading permissions...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="modules">
+      <h1>Modules</h1>
+      <p>Enable or disable bot modules. Disabled modules will not respond to commands or events.</p>
+      
+      <div id="modules-grid" class="modules-grid">
+        <p class="loading">Loading modules...</p>
+      </div>
+
+      <div id="module-detail-modal" class="modal" style="display: none;">
+        <div class="modal-content modal-medium">
+          <div class="modal-header">
+            <h2 id="module-detail-title">Module Details</h2>
+            <button class="modal-close" onclick="closeModuleDetailModal()">&times;</button>
+          </div>
+          <div id="module-detail-content" class="modal-body">
+            <p class="loading">Loading...</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tickets">
+      <h1>Tickets</h1>
+      <p>View and manage active modmail tickets.</p>
+      
+      <div class="tickets-layout">
+        <div class="tickets-list-panel">
+          <div class="tickets-header">
+            <h3>Active Tickets</h3>
+            <span id="ticket-count-badge" class="badge">0</span>
+          </div>
+          <div class="tickets-bulk-actions">
+            <label class="checkbox-label">
+              <input type="checkbox" id="ticket-select-all">
+              <span>Select All</span>
+            </label>
+            <button id="ticket-bulk-close-btn" class="btn-secondary btn-small" disabled>Close Selected</button>
+            <button id="ticket-bulk-priority-btn" class="btn-secondary btn-small" disabled>Change Priority</button>
+          </div>
+          <div id="tickets-list" class="tickets-list">
+            <p class="loading">Loading tickets...</p>
+          </div>
+        </div>
+        
+        <div class="tickets-detail-panel">
+          <div id="ticket-detail" class="ticket-detail">
+            <p class="empty-state">Select a ticket to view details</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="ticket-modal" class="modal" style="display: none;">
+        <div class="modal-content modal-medium">
+          <div class="modal-header">
+            <h2>Ticket History</h2>
+            <button class="modal-close" onclick="closeTicketModal()">&times;</button>
+          </div>
+          <div id="ticket-modal-content" class="modal-body">
+            <p class="loading">Loading...</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="ticket-priority-modal" class="modal" style="display: none;">
+        <div class="modal-content modal-small">
+          <div class="modal-header">
+            <h2>Change Priority</h2>
+            <button class="modal-close" onclick="closePriorityModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="priority-select">Select Priority:</label>
+              <select id="priority-select">
+                <option value="low">Low</option>
+                <option value="normal" selected>Normal</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </div>
+            <div class="form-actions">
+              <button class="btn-secondary" onclick="closePriorityModal()">Cancel</button>
+              <button class="btn-primary" onclick="applyBulkPriority()">Apply</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="logs">
+      <h1>Audit Logs</h1>
+      <p>View all actions performed through the dashboard and bot.</p>
+      
+      <div class="logs-filters">
+        <div class="filter-group">
+          <label for="log-action-filter">Filter by Action:</label>
+          <select id="log-action-filter">
+            <option value="">All Actions</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="log-actor-filter">Filter by Actor ID:</label>
+          <input type="text" id="log-actor-filter" placeholder="User ID...">
+        </div>
+        <button id="log-refresh-btn" class="btn-secondary">Refresh</button>
+        <button id="log-export-json-btn" class="btn-secondary">Export JSON</button>
+        <button id="log-export-csv-btn" class="btn-secondary">Export CSV</button>
+      </div>
+      
+      <div class="logs-table-container">
+        <table id="logs-table" class="logs-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Actor</th>
+              <th>Action</th>
+              <th>Target Type</th>
+              <th>Target ID</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="logs-tbody">
+            <tr>
+              <td colspan="6" class="loading">Loading logs...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      
+      <div class="logs-pagination">
+        <button id="log-prev-btn" class="btn-secondary" disabled>← Previous</button>
+        <span id="log-page-info">Page 1</span>
+        <button id="log-next-btn" class="btn-secondary">Next →</button>
+      </div>
+    </section>
+
+    <section id="moderation">
+      <h1>Moderation Dashboard</h1>
+      <p>View and manage all moderation actions taken on the server.</p>
+      
+      <div class="moderation-stats">
+        <div class="stat-card">
+          <h3>Total Cases</h3>
+          <p id="mod-total-cases">0</p>
+        </div>
+        <div class="stat-card">
+          <h3>Active Bans</h3>
+          <p id="mod-active-bans">0</p>
+        </div>
+        <div class="stat-card">
+          <h3>Total Kicks</h3>
+          <p id="mod-total-kicks">0</p>
+        </div>
+        <div class="stat-card">
+          <h3>Total Warns</h3>
+          <p id="mod-total-warns">0</p>
+        </div>
+        <div class="stat-card">
+          <h3>Total Mutes</h3>
+          <p id="mod-total-mutes">0</p>
+        </div>
+        <div class="stat-card">
+          <h3>Total Timeouts</h3>
+          <p id="mod-total-timeouts">0</p>
+        </div>
+      </div>
+
+      <div class="moderation-filters">
+        <div class="filter-group">
+          <label for="mod-action-filter">Action Type:</label>
+          <select id="mod-action-filter">
+            <option value="">All Actions</option>
+            <option value="ban">Ban</option>
+            <option value="kick">Kick</option>
+            <option value="warn">Warn</option>
+            <option value="mute">Mute</option>
+            <option value="timeout">Timeout</option>
+            <option value="unban">Unban</option>
+            <option value="unmute">Unmute</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="mod-user-filter">User ID:</label>
+          <input type="text" id="mod-user-filter" placeholder="User ID...">
+        </div>
+        <div class="filter-group">
+          <label for="mod-moderator-filter">Moderator ID:</label>
+          <input type="text" id="mod-moderator-filter" placeholder="Moderator ID...">
+        </div>
+        <div class="filter-group">
+          <label for="mod-start-date">Start Date:</label>
+          <input type="date" id="mod-start-date">
+        </div>
+        <div class="filter-group">
+          <label for="mod-end-date">End Date:</label>
+          <input type="date" id="mod-end-date">
+        </div>
+        <button id="mod-refresh-btn" class="btn-secondary">Refresh</button>
+        <button id="mod-export-json-btn" class="btn-secondary">Export JSON</button>
+        <button id="mod-export-csv-btn" class="btn-secondary">Export CSV</button>
+      </div>
+      
+      <div class="moderation-table-container">
+        <table id="moderation-table" class="moderation-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Action</th>
+              <th>User</th>
+              <th>Moderator</th>
+              <th>Reason</th>
+              <th>Date</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="moderation-tbody">
+            <tr>
+              <td colspan="7" class="loading">Loading cases...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      
+      <div class="moderation-pagination">
+        <button id="mod-prev-btn" class="btn-secondary" disabled>← Previous</button>
+        <span id="mod-page-info">Page 1</span>
+        <button id="mod-next-btn" class="btn-secondary">Next →</button>
+      </div>
+
+      <div id="case-detail-modal" class="modal" style="display: none;">
+        <div class="modal-content modal-large">
+          <div class="modal-header">
+            <h2>Case Details</h2>
+            <button class="modal-close" onclick="closeCaseDetailModal()">&times;</button>
+          </div>
+          <div id="case-detail-content" class="modal-body">
+            <p class="loading">Loading case details...</p>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section id="settings">
+      <h1>Settings</h1>
+      <p>Configure general bot settings, moderation channels, and jail configuration.</p>
+      <div id="settings-content" class="settings-grid">
+        <p class="loading">Loading settings...</p>
+      </div>
+    </section>
+
+    <section id="leveling">
+      <h1>Leveling / XP</h1>
+      <p>Configure the XP and leveling system, rewards, and leaderboard.</p>
+      <div id="leveling-content"></div>
+    </section>
+
+    <section id="starboard">
+      <h1>Starboard</h1>
+      <p>Configure the starboard — repost highly-reacted messages.</p>
+      <div id="starboard-content"></div>
+    </section>
+
+    <section id="security">
+      <h1>Security</h1>
+      <p>Configure anti-raid and anti-nuke protection.</p>
+      <div id="security-tabs" class="tabs">
+        <button class="tab-btn active" data-tab="antiraid">Anti-Raid</button>
+        <button class="tab-btn" data-tab="antinuke">Anti-Nuke</button>
+        <button class="tab-btn" data-tab="pbanweights">PBAN Weights</button>
+      </div>
+      <div id="security-content">
+        <p class="loading">Loading security config...</p>
+      </div>
+    </section>
+
+    <section id="counters">
+      <h1>Counters</h1>
+      <p>Manage voice channel counters that display server statistics.</p>
+      <div class="counters-toolbar">
+        <button id="counter-create-btn" class="btn-primary">Create Counter</button>
+        <button id="counter-refresh-btn" class="btn-secondary">Refresh</button>
+      </div>
+      <div id="counters-content">
+        <p class="loading">Loading counters...</p>
+      </div>
+
+      <div id="counter-modal" class="modal" style="display: none;">
+        <div class="modal-content modal-small">
+          <div class="modal-header">
+            <h2>Create Counter</h2>
+            <button class="modal-close" onclick="closeCounterModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <form id="counter-form">
+              <div class="form-group">
+                <label for="counter-type">Type</label>
+                <select id="counter-type" required>
+                  <option value="members">Member Count</option>
+                  <option value="bots">Bot Count</option>
+                  <option value="total">Total Users</option>
+                  <option value="channels">Channel Count</option>
+                  <option value="roles">Role Count</option>
+                  <option value="boosts">Boost Count</option>
+                  <option value="boost_tier">Boost Tier</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="counter-channel">Voice Channel</label>
+                <select id="counter-channel" required>
+                  <option value="">Select a voice channel...</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="counter-name">Name Format (use {count} as placeholder)</label>
+                <input type="text" id="counter-name" value="{count} members" maxlength="100">
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn-secondary" onclick="closeCounterModal()">Cancel</button>
+                <button type="submit" class="btn-primary">Create</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="autoroles">
+      <h1>Auto-Roles</h1>
+      <p>Manage roles that are automatically assigned to new members when they join.</p>
+      <div class="autoroles-toolbar">
+        <button id="autorole-add-btn" class="btn-primary">Add Role</button>
+        <button id="autorole-refresh-btn" class="btn-secondary">Refresh</button>
+      </div>
+      <div id="autoroles-content">
+        <p class="loading">Loading auto-roles...</p>
+      </div>
+
+      <div id="autorole-modal" class="modal" style="display: none;">
+        <div class="modal-content modal-small">
+          <div class="modal-header">
+            <h2>Add Auto-Role</h2>
+            <button class="modal-close" onclick="closeAutoroleModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <form id="autorole-form">
+              <div class="form-group">
+                <label for="autorole-select">Role</label>
+                <select id="autorole-select" required>
+                  <option value="">Select a role...</option>
+                </select>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn-secondary" onclick="closeAutoroleModal()">Cancel</button>
+                <button type="submit" class="btn-primary">Add</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
